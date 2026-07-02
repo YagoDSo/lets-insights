@@ -1,0 +1,25 @@
+{
+  "name": "newsletter-lets",
+  "version": "0.1.0",
+  "description": "Let's Insights — newsletter B2B automatizada (migrada do N8N para Node + GitHub Actions)",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test-conexao": "node src/test-conexao.js",
+    "wf01": "node src/wf01-coleta.js",
+    "wf02": "node src/wf02-curadoria.js",
+    "wf03": "node src/wf03-montagem-envio.js",
+    "pipeline": "node src/wf01-coleta.js && node src/wf02-curadoria.js && node src/wf03-montagem-envio.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.4.0",
+    "googleapis": "^144.0.0",
+    "nodemailer": "^6.9.0",
+    "rss-parser": "^3.13.0"
+  }
+}

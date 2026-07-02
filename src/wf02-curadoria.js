@@ -1,0 +1,315 @@
+// ════════════════════════════════════════════════════════════
+// WF-02 — Curadoria + Redação (porte fiel do PROD-WF-02.json)
+// Fluxo: Definir Edição → Ler Artigos → Filtrar Edição →
+//   Curadoria (Claude) → Buscar HTML/Extrair Imagem →
+//   Validar URLs Vivas → Redação (Claude) → Parse + Validar URLs →
+//   Salvar Edição
+// ════════════════════════════════════════════════════════════
+import { config, requireEnv } from './lib/config.js';
+import { lerAba, upsertLinhas } from './lib/store.js';
+import { chamarClaude } from './lib/claude.js';
+import { repairJSON } from './lib/repair.js';
+
+// ─── Buscar HTML do Artigo (GET, tolerante a falha, timeout 15s) ─
+async function buscarHTML(url) {
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 15000);
+    const resp = await fetch(encodeURI(decodeURIComponent(url)), {
+      redirect: 'follow',
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LetsInsights-Bot/1.0; +https://www.lets.com.br)' },
+    });
+    clearTimeout(t);
+    return await resp.text();
+  } catch {
+    return '';
+  }
+}
+
+// ─── Extrair Imagem (og:image → twitter:image → image_src) ───
+function extrairImagem(html) {
+  let imagem = null;
+  let m = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
+  if (m) imagem = m[1];
+  if (!imagem) {
+    m = html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+    if (m) imagem = m[1];
+  }
+  if (!imagem) {
+    m = html.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i);
+    if (m) imagem = m[1];
+  }
+  if (!imagem) {
+    m = html.match(/<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']/i);
+    if (m) imagem = m[1];
+  }
+  if (imagem) {
+    if (imagem.startsWith('//')) imagem = 'https:' + imagem;
+    if (imagem.startsWith('http://')) imagem = imagem.replace('http://', 'https://');
+  }
+  return imagem || null;
+}
+
+// ─── Validar URLs Vivas (HEAD, timeout 5s) ───────────────────
+async function validarURL(url) {
+  if (!url || typeof url !== 'string') return { ok: false, status: 0 };
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 5000);
+    const resp = await fetch(url, {
+      method: 'HEAD',
+      redirect: 'follow',
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LetsInsights-Bot/1.0; +https://www.lets.com.br)' },
+    });
+    clearTimeout(t);
+    return { ok: resp.ok, status: resp.status };
+  } catch {
+    return { ok: false, status: 0 }; // timeout/erro de rede: benefício da dúvida
+  }
+}
+// status 0 (rede) = mantém; >=400 = descarta.
+const deveDescartar = (r) => (r.status === 0 ? false : r.status >= 400);
+
+// ─── Prompts (verbatim do PROD-WF-02; carregam as regras de negócio) ──
+function promptCuradoria(artigos) {
+  return `Você é o editor de uma newsletter B2B voltada para gestores de frota empresarial, diretores de logística e CFOs de empresas que terceirizam veículos no Brasil. Sua audiência é composta por clientes da Let's (gestão de frotas do Grupo Águia Branca).
+
+Avalie cada artigo e selecione os 7 mais relevantes seguindo:
+1. RELEVÂNCIA (40%): Impacto direto na decisão de terceirizar frota ou na operação
+2. ATUALIDADE (20%): Quanto mais recente, melhor
+3. AUTORIDADE DA FONTE (20%): Fontes especializadas valem mais
+4. ACIONABILIDADE (20%): O leitor pode fazer algo com a informação?
+
+Descarte: conteúdo promocional, cases de concorrente direta, notícias internacionais sem relevância pro Brasil.
+
+REGRA DE DIVERSIDADE DE FONTE: no máximo 2 matérias da mesma fonte entre as 7 escolhidas.
+
+REGRA DE DIVERSIDADE DE TEMA (CRÍTICA): cada artigo tem um campo "tema". Entre os 7 selecionados, NÃO concentre num único tema. Distribua entre temas diferentes (Eletrificacao, Regulacao, Tecnologia, Mercado, RenovacaoFrota, Custos, Logistica, Outros). O ideal é que os 3 PRINCIPAIS (top 3 por score) sejam de 3 temas DISTINTOS entre si. Se houver muitos artigos do mesmo tema, escolha o melhor de cada tema antes de repetir tema. Variedade temática é mais importante que pequenas diferenças de score.
+
+IMPORTANTE: ordene os 7 selecionados pelo score (do maior pro menor), MAS respeitando a diversidade de tema nos 3 primeiros. Atribua scores diferenciados.
+
+Retorne APENAS JSON válido (sem markdown), ordenado por score decrescente:
+{"selecionados": [{"titulo_original": "...", "url": "...", "fonte": "...", "data": "...", "tema": "...", "score": 0-10, "justificativa": "...", "categoria": "Análise|Renovação de frota|Regulação|Tecnologia|Carbono|Sazonalidade|Mercado"}]}
+
+ARTIGOS:
+${JSON.stringify(artigos, null, 2)}`;
+}
+
+function promptRedacao(selecionados) {
+  return `Você é o redator-chefe da newsletter 'Let's Insights', uma publicação semanal B2B da Let's (gestão de frotas do Grupo Águia Branca) voltada para gestores de frota, diretores de logística e tomadores de decisão.
+
+TOM DE VOZ: Profissional mas não engessado, direto sem floreios, autoridade sem arrogância, sempre traz camada de 'e o que isso significa pra você?', português brasileiro formal-acessível. NUNCA use travessão (—).
+
+REGRAS DE COPYRIGHT (CRÍTICO): NUNCA copie trechos literais. SEMPRE parafraseie. Cite a fonte ao final.
+
+REGRA DE DIVERSIDADE EDITORIAL (CRÍTICA): das 7 matérias que recebeu, ao escolher os 3 principais e 3 cards (6 total), garanta que NO MÁXIMO 2 sejam da mesma fonte. Distribua entre as fontes disponíveis.
+
+REGRA DE DIVERSIDADE DE TEMA (CRÍTICA): cada artigo tem um campo "tema". Os 3 PRINCIPAIS devem ser de 3 temas DISTINTOS entre si (nunca 2 principais do mesmo tema). Nos 3 CARDS, no MÁXIMO 1 card por tema (nunca 2 cards do mesmo tema). Se receber muitos artigos do mesmo tema, use o melhor como principal ou card e descarte os demais repetidos de tema, preferindo variedade. Variedade temática é mais importante que pequenas diferenças de score.
+
+REGRA CRÍTICA DE INTEGRIDADE DE DADOS: você DEVE preservar EXATAMENTE como recebidos os campos url, fonte e imagem de cada artigo. NUNCA invente, modifique, encurte ou abrevie URLs. NUNCA troque URLs entre artigos. Esta regra é INVIOLÁVEL.
+
+Você receberá 7 artigos ordenados por score (do maior pro menor). Trate eles em 2 grupos:
+
+GRUPO 1 - ARTIGOS PRINCIPAIS (posições 0, 1, 2): destaque editorial
+Para CADA artigo principal, gere:
+- categoria (1-2 palavras, ex: "Análise", "Pesados", "Leves", "Regulação", "Renovação de frota")
+- subtitulo (1 palavra/curto identificando o tema, ex: "Pesados", "Leves", "Regulação")
+- resumo (parafraseado, máx 50 palavras, traz contexto + dado/insight principal)
+- MANTENHA url, fonte e imagem EXATAMENTE como vieram
+
+GRUPO 2 - CARDS (posições 3, 4, 5): cards menores no grid
+Para CADA card, gere:
+- categoria (1 palavra, ex: "Telemetria", "Carbono", "Sazonalidade")
+- resumo (parafraseado, máx 25 palavras, frase única e direta)
+- MANTENHA url, fonte e imagem EXATAMENTE como vieram
+
+GRUPO 3 - BACKUP (posição 6): descartar, é só reserva caso algum dos 6 acima tenha problema
+
+Gere também:
+
+1. TÍTULO DA EDIÇÃO no formato OBRIGATÓRIO: "Let's Insights · [destaque]"
+   - Destaque: máx 40 caracteres, verbo de ação ou novidade concreta
+   - NUNCA omita o prefixo "Let's Insights · "
+   - Use "·" (ponto médio U+00B7), nunca hífen
+
+2. PRÉ-HEADER (máx 90 caracteres, vira preview no inbox)
+
+3. CTA_FINAL (chamada pra falar com especialista Let's)
+   - titulo (pergunta provocativa, máx 60 chars)
+   - texto (2 frases explicando o que oferece)
+   - botao (texto do botão, ex: "FALAR COM ESPECIALISTA")
+
+Retorne APENAS JSON válido (sem markdown):
+{
+  "titulo_edicao": "...",
+  "pre_header": "...",
+  "artigos_principais": [
+    {"categoria": "...", "subtitulo": "...", "resumo": "...", "url": "...", "fonte": "...", "imagem": "..."}
+  ],
+  "artigos_cards": [
+    {"categoria": "...", "resumo": "...", "url": "...", "fonte": "...", "imagem": "..."}
+  ],
+  "cta_final": {"titulo": "...", "texto": "...", "botao": "..."}
+}
+
+ARTIGOS (ordenados por score):
+${JSON.stringify(selecionados, null, 2)}`;
+}
+
+// ─── Orquestração ────────────────────────────────────────────
+async function main() {
+  requireEnv(['SHEETS_DOC_ID', 'ANTHROPIC_API_KEY']);
+
+  // "Ler Artigos Coletados" + "Definir Edição": max(edicao) = a que o WF-01 gravou.
+  const { rows } = await lerAba(config.abaArtigos);
+  const numeros = rows.map((r) => parseInt(r.edicao)).filter((n) => !isNaN(n) && n > 0);
+  const edicaoAtual = String(numeros.length > 0 ? Math.max(...numeros) : 1);
+  console.log(`✓ Edição para curadoria: ${edicaoAtual}`);
+
+  // "Filtrar Edição Atual"
+  const dessaEdicao = rows.filter((r) => String(r.edicao) === edicaoAtual);
+  if (dessaEdicao.length === 0) {
+    throw new Error(`Nenhum artigo para edição ${edicaoAtual}. WF-01 não rodou ou não encontrou conteúdo.`);
+  }
+  if (dessaEdicao.length < 7) {
+    console.log(`⚠️ Apenas ${dessaEdicao.length} artigos disponíveis (esperado 7). Newsletter pode ficar incompleta.`);
+  }
+  console.log(`Artigos da edição ${edicaoAtual}: ${dessaEdicao.length}`);
+
+  // "Preparar Curadoria" + "Claude API - Curadoria" + "Parse Curadoria"
+  const artigos = dessaEdicao.map((r, idx) => ({
+    id: idx + 1,
+    titulo: r.titulo,
+    url: r.url,
+    fonte: r.fonte,
+    data: r.data_publicacao,
+    resumo: r.resumo,
+    tema: r.tema || 'Outros',
+  }));
+  const textoCuradoria = await chamarClaude(promptCuradoria(artigos), { maxTokens: 4000 });
+  let dadosCuradoria;
+  try {
+    dadosCuradoria = JSON.parse(repairJSON(textoCuradoria));
+  } catch (e) {
+    throw new Error('Falha ao parsear JSON da curadoria: ' + e.message);
+  }
+  if (!dadosCuradoria.selecionados || !Array.isArray(dadosCuradoria.selecionados)) {
+    throw new Error('JSON da curadoria inválido');
+  }
+  const selecionados = dadosCuradoria.selecionados.map((art, idx) => ({ ...art, posicao: idx }));
+  console.log(`Curadoria: ${selecionados.length} artigos selecionados`);
+
+  // "Buscar HTML do Artigo" + "Extrair Imagem"
+  const comImagem = [];
+  for (let idx = 0; idx < selecionados.length; idx++) {
+    const original = selecionados[idx];
+    const tipo = idx < 3 ? 'PRINCIPAL' : 'CARD';
+    const html = await buscarHTML(original.url);
+    const imagem = extrairImagem(html);
+    console.log(`[${idx}] ${tipo}: ${original.titulo_original} (${original.fonte}) ${imagem ? '✓ img' : '✗ sem img'}`);
+    comImagem.push({
+      titulo_original: original.titulo_original,
+      url: original.url,
+      fonte: original.fonte,
+      data: original.data,
+      score: original.score,
+      justificativa: original.justificativa,
+      categoria: original.categoria,
+      tema: original.tema || 'Outros',
+      imagem,
+      posicao: idx,
+    });
+  }
+
+  // "Validar URLs Vivas"
+  console.log(`\nValidando ${comImagem.length} artigos...`);
+  const validados = [];
+  let descartados = 0;
+  let imagensDescartadas = 0;
+  for (let idx = 0; idx < comImagem.length; idx++) {
+    const artigo = comImagem[idx];
+    const vURL = await validarURL(artigo.url);
+    if (deveDescartar(vURL)) {
+      console.log(`  [${idx}] ✗ DESCARTADO: HTTP ${vURL.status}`);
+      descartados++;
+      continue;
+    }
+    let imagem = artigo.imagem;
+    if (imagem) {
+      const vImg = await validarURL(imagem);
+      if (deveDescartar(vImg)) {
+        imagem = null;
+        imagensDescartadas++;
+      }
+    }
+    validados.push({ ...artigo, imagem });
+  }
+  console.log(`Válidos: ${validados.length}/${comImagem.length} | descartados: ${descartados} | imagens removidas: ${imagensDescartadas}`);
+  if (validados.length < 6) {
+    console.log(`⚠️ ALERTA: só ${validados.length} artigos válidos (precisa de 6: 3 principais + 3 cards).`);
+  }
+  if (validados.length === 0) {
+    throw new Error('Todos os artigos foram descartados na validação. Verifique o WF-01.');
+  }
+
+  // "Preparar Redação" + "Claude API - Redação"
+  const textoRedacao = await chamarClaude(promptRedacao(validados), { maxTokens: 4000 });
+  let edicao;
+  try {
+    edicao = JSON.parse(repairJSON(textoRedacao));
+  } catch (e) {
+    throw new Error('Falha ao parsear JSON da redação: ' + e.message);
+  }
+
+  // "Parse Edição Final + Validar URLs"
+  const obrigatorios = ['titulo_edicao', 'pre_header', 'artigos_principais', 'artigos_cards', 'cta_final'];
+  const faltando = obrigatorios.filter((c) => !edicao[c]);
+  if (faltando.length > 0) throw new Error(`Campos faltando: ${faltando.join(', ')}`);
+  if (!Array.isArray(edicao.artigos_principais) || edicao.artigos_principais.length === 0) {
+    throw new Error('artigos_principais inválido ou vazio');
+  }
+  if (!Array.isArray(edicao.artigos_cards)) throw new Error('artigos_cards inválido');
+
+  // Integridade de URL: corrige URL/fonte/imagem caso a IA tenha inventado.
+  const mapaOriginal = {};
+  validados.forEach((s) => (mapaOriginal[s.url] = { url: s.url, fonte: s.fonte, imagem: s.imagem }));
+  const validarArtigo = (artIA, posEsperada, tipo) => {
+    const urlIA = artIA.url || '';
+    if (mapaOriginal[urlIA]) {
+      const o = mapaOriginal[urlIA];
+      return { ...artIA, url: o.url, fonte: o.fonte, imagem: o.imagem };
+    }
+    if (validados[posEsperada]) {
+      const o = validados[posEsperada];
+      console.log(`⚠️ URL corrigida (${tipo} pos ${posEsperada}): IA inventou, usando original`);
+      return { ...artIA, url: o.url, fonte: o.fonte, imagem: o.imagem };
+    }
+    return artIA;
+  };
+  const principais = edicao.artigos_principais.map((a, idx) => validarArtigo(a, idx, 'PRINCIPAL'));
+  const cards = edicao.artigos_cards.map((a, idx) => validarArtigo(a, idx + 3, 'CARD'));
+
+  console.log(`✓ Edição ${edicaoAtual} gerada: "${edicao.titulo_edicao}"`);
+  console.log(`Principais: ${principais.length} | Cards: ${cards.length}`);
+
+  // "Salvar Edição" (upsert por edicao)
+  const linha = {
+    edicao: edicaoAtual,
+    titulo_edicao: edicao.titulo_edicao,
+    pre_header: edicao.pre_header,
+    json_artigos_principais: JSON.stringify(principais),
+    json_artigos_cards: JSON.stringify(cards),
+    json_cta: JSON.stringify(edicao.cta_final),
+    status: 'pronto_envio_com_imagens',
+    gerado_em: new Date().toISOString(),
+  };
+  const res = await upsertLinhas(config.abaEdicoes, [linha], 'edicao');
+  console.log(`✓ Salvo na aba ${config.abaEdicoes}: ${res.inseridos} inseridos, ${res.atualizados} atualizados.`);
+}
+
+main().catch((e) => {
+  console.error('✗ WF-02 falhou:', e);
+  process.exit(1);
+});
