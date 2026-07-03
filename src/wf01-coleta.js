@@ -5,9 +5,9 @@
 //   Filtrar Concorrentes → Enriquecer e Limitar → Salvar
 // ════════════════════════════════════════════════════════════
 import { pathToFileURL } from 'url';
-import { config, requireEnv } from './lib/config.js';
+import { config } from './lib/config.js';
 import { lerFeeds } from './lib/rss.js';
-import { lerAba, upsertLinhas } from './lib/store.js';
+import { lerAba, upsertLinhas, commitarBanco } from './lib/db.js';
 import { chamarClaudeComWebSearch } from './lib/claude.js';
 import { repairJSON } from './lib/repair.js';
 
@@ -415,8 +415,6 @@ function enriquecerELimitar(itens, edicaoAtual) {
 
 // ─── Orquestração ────────────────────────────────────────────
 async function main() {
-  requireEnv(['SHEETS_DOC_ID']);
-
   // "Ler Edicoes": lê toda a aba Artigos_Coletados (numeração + dedup histórico).
   const { rows: historico } = await lerAba(config.abaArtigos);
 
@@ -463,6 +461,7 @@ async function main() {
   // "Salvar no Google Sheets": upsert por url.
   const res = await upsertLinhas(config.abaArtigos, finais, 'url');
   console.log(`✓ Salvo: ${res.inseridos} inseridos, ${res.atualizados} atualizados.`);
+  commitarBanco(`chore: WF-01 coleta edição ${edicaoAtual} (${res.inseridos} novo(s), ${res.atualizados} atualizado(s))`);
 }
 
 export { buscarArtigosWeb };

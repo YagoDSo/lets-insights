@@ -27,9 +27,10 @@ A automação roda em **N8N Cloud** e é composta por **3 workflows** que rodam 
 
 - **N8N Cloud** v2.27.4
 - **Claude API** modelo `claude-sonnet-4-5-20250929` (curadoria, redação, e antigamente filtro de concorrentes)
-- **Google Sheets** — banco de dados. Doc ID: `1xSjvbZwI-3oLScimPcpBftB2E4muLV07dt1ZOVo3N5s`
-  - Aba **Edicoes** — gid `1325127310` — colunas: `edicao, titulo_edicao, pre_header, json_artigos_principais, json_artigos_cards, json_cta, status, gerado_em, enviado_em`
-  - Aba **Artigos_Coletados** — gid `1508227275` — colunas: `edicao, data_coleta, titulo, url, fonte, data_publicacao, resumo, status, tema`
+- **SQLite** (`data/newsletter.db`, via `better-sqlite3`) — banco de dados da implementação Node.js atual (ver `src/lib/db.js`). O arquivo `.db` é commitado no próprio repo pelo bot (`Lets Insights Bot <bot@lets.com.br>`) ao final de cada workflow, mesmo padrão já usado pra imagens geradas (`src/lib/gitAssets.js`) — necessário porque os jobs do GitHub Actions são efêmeros e o próximo job da cadeia (`needs`) precisa enxergar o estado atualizado via checkout do `main`.
+  - Tabela **edicoes** (PK `edicao`) — colunas: `edicao, titulo_edicao, pre_header, json_artigos_principais, json_artigos_cards, json_cta, status, gerado_em, enviado_em`
+  - Tabela **artigos_coletados** (PK `url`) — colunas: `url, edicao, data_coleta, titulo, fonte, data_publicacao, resumo, status, tema`
+  - **Legado N8N (pré-migração):** o N8N usava **Google Sheets** como banco (doc `1xSjvbZwI-3oLScimPcpBftB2E4muLV07dt1ZOVo3N5s`, abas `Edicoes` gid `1325127310` e `Artigos_Coletados` gid `1508227275`). Migração pra SQLite feita em jul/2026 **sem** importar o histórico do Sheets (banco novo nasceu vazio — dedup histórico e numeração de edição resetaram). As seções "Arquitetura detalhada dos workflows" abaixo descrevem o comportamento de referência dos `.json` do N8N; os bugs de `matchingColumns`/`appendOrUpdate` são específicos do Sheets e não existem no SQLite.
 - **E-goi** — disparo de produção (futuro). **Gmail** — preview atual.
 - **CDN de imagens** (logo, ícones): SendGrid account `aead0c601c58f7b7`.
 - **Gemini API** (`gemini-2.5-flash-image`, "Nano Banana") — geração de imagem fallback quando artigo não tem imagem própria válida. Ver `src/lib/imagegen.js`.
@@ -46,7 +47,7 @@ A automação roda em **N8N Cloud** e é composta por **3 workflows** que rodam 
 7. **Assunto:** padrão `Let's Insights · [destaque]` com **ponto médio U+00B7** (não hífen).
 8. **ClickUp:** **NUNCA** criar/editar/ler/mover/comentar tasks **sem autorização explícita do Yago na mensagem específica** — mesmo que pareça implícito. Sempre ler uma task antes de atualizar. (Workspace 36916834; tasks de referência: `86ahfmnwx` projeto, `86ahderm5` log de resultados.)
 9. **Integrações:** nunca inventar capacidades/APIs. Verificar viabilidade antes de propor.
-10. **Decisões fechadas:** schedules independentes (não encadear) *(pré-migração; ver nota no fim do arquivo)*, modelo Sonnet 4.5, Google Sheets como banco (não migrar para Airtable/Supabase/Notion por enquanto), repositório GitHub público (necessário pra hospedar imagens fallback via `raw.githubusercontent.com` — decisão tomada cientes de que expõe código/prompts/regras de negócio; credenciais seguem só em Secrets).
+10. **Decisões fechadas:** schedules independentes (não encadear) *(pré-migração; ver nota no fim do arquivo)*, modelo Sonnet 4.5, **SQLite commitado no repo como banco** (jul/2026, substituiu Google Sheets; ver "Stack e identificadores" — não migrar para Postgres/Supabase/Airtable/Notion por enquanto), repositório GitHub público (necessário pra hospedar imagens fallback via `raw.githubusercontent.com` — decisão tomada cientes de que expõe código/prompts/regras de negócio; credenciais seguem só em Secrets).
 
 ## Como o Yago gosta de trabalhar (preferências)
 
@@ -125,6 +126,8 @@ Toda Segunda 06:06 → Ler Todas as Edições1 → Validar e Selecionar Edição
 - `repairJSON()` é necessário para parsear com robustez a saída JSON do Claude.
 - `raw.githubusercontent.com` **não serve arquivos de repositório privado** sem autenticação (não dá pra passar Authorization header num `<img src>` de e-mail). Só funciona se o repo for público — daí a decisão de tornar `lets-insights` público em jul/2026.
 - Commits automáticos de CI (imagens geradas) usam identidade `Lets Insights Bot <bot@lets.com.br>` via `git config` no próprio script (`src/lib/gitAssets.js`), pra diferenciar de commits manuais do Yago no histórico.
+- **SQLite commitado no repo (jul/2026):** como os jobs do GitHub Actions são efêmeros, `data/newsletter.db` só persiste entre WF-01→WF-02→WF-03 porque cada script chama `commitarBanco()` (`src/lib/db.js`) ao final, e cada job do workflow faz `actions/checkout` com `ref: main` explícito (não o padrão `github.sha`) pra pegar o commit do job anterior na mesma execução.
+- `better-sqlite3` não tem binário pré-compilado pra toda versão do Node imediatamente após o lançamento (ex: Node 24 exigiu a versão `^12.x`; a `11.x` só compila via `node-gyp`, que exige Python/Visual Studio Build Tools instalados). Ao atualizar Node localmente ou no `setup-node` do Actions, confirmar que a versão do `better-sqlite3` no `package.json` tem prebuild pra aquele ABI.
 
 ## Pendências / backlog
 

@@ -5,7 +5,7 @@
 //   Atualizar status
 // ════════════════════════════════════════════════════════════
 import { config, requireEnv } from './lib/config.js';
-import { lerAba, upsertLinhas } from './lib/store.js';
+import { lerAba, upsertLinhas, commitarBanco } from './lib/db.js';
 import { montarHTML } from './lib/template.js';
 import { enviarPreview } from './lib/sender.js';
 
@@ -101,7 +101,7 @@ function extrairImagemPost(htmlPost) {
 
 // ─── Orquestração ────────────────────────────────────────────
 async function main() {
-  requireEnv(['SHEETS_DOC_ID', 'GMAIL_USER', 'GMAIL_APP_PASSWORD']);
+  requireEnv(['GMAIL_USER', 'GMAIL_APP_PASSWORD']);
 
   // "Ler Todas as Edições1" + "Validar e Selecionar Edição1"
   const { rows } = await lerAba(config.abaEdicoes);
@@ -154,6 +154,7 @@ async function main() {
   };
   const res = await upsertLinhas(config.abaEdicoes, [linha], 'edicao');
   console.log(`✓ Status atualizado na aba ${config.abaEdicoes}: ${res.atualizados} atualizado(s).`);
+  commitarBanco(`chore: WF-03 envio edição ${selected.edicao}`);
 }
 
 main().catch((e) => {
