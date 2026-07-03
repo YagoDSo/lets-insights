@@ -4,9 +4,12 @@
 //   Calcular Idade → Filtrar Palavras-Chave → Deduplicar →
 //   Filtrar Concorrentes → Enriquecer e Limitar → Salvar
 // ════════════════════════════════════════════════════════════
+import { pathToFileURL } from 'url';
 import { config, requireEnv } from './lib/config.js';
 import { lerFeeds } from './lib/rss.js';
 import { lerAba, upsertLinhas } from './lib/store.js';
+import { chamarClaudeComWebSearch } from './lib/claude.js';
+import { repairJSON } from './lib/repair.js';
 
 // 9 feeds RSS (mesma lista do PROD-WF-01).
 const FEEDS = [
@@ -24,6 +27,75 @@ const FEEDS = [
 // Normaliza texto: minúsculas + remove acentos. Usado nos filtros e no classificador.
 const normalizar = (s) =>
   (s || '').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
+
+// ─── Busca web (Claude API, tool nativa "web_search") ────────
+// Complementa os 9 feeds RSS fixos: busca mais amplamente pela internet por
+// notícias alinhadas ao ICP da Let's, sempre limitando a artigos publicados
+// nos últimos N dias. Roda em paralelo aos RSS; os resultados entram no MESMO
+// pipeline de filtros (relevância, dedup, concorrentes) — não é uma via separada.
+const TEMAS_BUSCA_ICP = [
+  'gestão de frota corporativa notícias Brasil',
+  'TCO custo total de propriedade frota de veículos Brasil',
+  'RAC2 laudo de vistoria veicular compliance frota',
+  'mineração frota de veículos pickup 4x4 Brasil',
+  'geotecnia frota veículos operação de campo',
+  'meio ambiente licenciamento ambiental frota veículos',
+  'obras infraestrutura concessão de rodovias frota veículos',
+];
+
+async function buscarArtigosWeb(diasJanela = 7) {
+  const hoje = new Date().toISOString().substring(0, 10);
+  const prompt = `Data de referência (hoje): ${hoje}. Você tem acesso a uma ferramenta de busca na web.
+
+Pesquise notícias em português, de fontes brasileiras (portais de notícias, imprensa especializada em logística/frotas/mineração/infraestrutura/meio ambiente), sobre estes temas:
+${TEMAS_BUSCA_ICP.map((q, i) => `${i + 1}. ${q}`).join('\n')}
+
+REGRA CRÍTICA DE DATA: só inclua um artigo se você conseguir identificar com confiança a data de publicação dele E essa data estiver dentro dos últimos ${diasJanela} dias corridos contados a partir de ${hoje}. Se não conseguir confirmar a data de publicação, DESCARTE o resultado — nunca estime ou invente uma data.
+
+Não inclua: releases institucionais sem valor de notícia, posts de rede social, fóruns, páginas sem data verificável, ou resultados de fontes que não sejam veículos de imprensa/portais especializados.
+
+Para cada artigo aprovado, retorne um objeto com estes campos exatos:
+- titulo: título do artigo, como publicado (não traduza)
+- url: URL completa e real do artigo (nunca invente uma URL)
+- data: data de publicação, formato YYYY-MM-DD
+- resumo: resumo de até 400 caracteres do conteúdo do artigo
+- fonte: nome do veículo/portal que publicou
+
+Sua resposta final deve conter SOMENTE o array JSON — nenhuma frase de introdução, explicação ou conclusão antes ou depois, mesmo que o array esteja vazio: []`;
+
+  try {
+    const { texto, buscasRealizadas } = await chamarClaudeComWebSearch(prompt, {
+      maxTokens: 8000,
+      maxBuscas: 15,
+    });
+    console.log(`Busca web: ${buscasRealizadas} buscas realizadas pela IA`);
+    // O modelo às vezes explica antes/depois do array mesmo sendo instruído a não
+    // fazer isso; extrai só o trecho entre o primeiro '[' e o último ']'.
+    const match = texto.match(/\[[\s\S]*\]/);
+    if (!match) throw new Error('Nenhum array JSON encontrado na resposta');
+    const artigos = JSON.parse(repairJSON(match[0]));
+    if (!Array.isArray(artigos)) throw new Error('Resposta não é um array JSON');
+
+    const validos = artigos
+      .filter((a) => a && a.titulo && a.url)
+      .map((a) => ({
+        titulo: String(a.titulo).trim(),
+        url: a.url,
+        data: a.data || hoje,
+        resumo: String(a.resumo || '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .substring(0, 500),
+        fonte: a.fonte || 'Busca web',
+        _origem: 'busca_web',
+      }));
+    console.log(`Busca web: ${validos.length} artigos retornados (antes dos filtros de relevância/dedup)`);
+    return validos;
+  } catch (e) {
+    console.log(`⚠️ Busca web falhou (${e.message}). Seguindo só com RSS.`);
+    return [];
+  }
+}
 
 // ─── Nó "Padronizar Estrutura" ───────────────────────────────
 function padronizar(itens) {
@@ -53,6 +125,7 @@ function padronizar(itens) {
         .trim()
         .substring(0, 500),
       fonte,
+      _origem: 'rss',
     };
   });
 
@@ -101,11 +174,23 @@ function filtrarRelevancia(itens) {
     'descarbonizacao', 'tco', 'custo total de propriedade', 'gestão de ativos', 'asset management',
     'emissão de co2 frota', 'pegada de carbono frota', 'esg frota', 'frota sustentável', 'abla',
     'fenabrave', 'sindipeças', 'sindipecas', 'locadora de veículos', 'locadora de frota',
+    // ICP Let's (jul/2026): operação de campo, compliance/RAC2, setores prioritários e dores que ativam
+    'rac2', 'laudo de vistoria veicular', 'laudo técnico veicular', 'inspeção veicular',
+    'certificado de inspeção veicular', 'manutenção corretiva', 'nr-12', 'nr12', 'qsms',
+    'operação de campo', 'terreno adverso', 'pickup 4x4', 'picape 4x4', 'utilitário 4x4',
+    'veículo 4x4', 'frota pesada', 'geotecnia', 'geotécnica', 'mineração', 'mineradora',
+    'exploração mineral', 'licenciamento ambiental', 'concessão de rodovias',
+    'concessionária de rodovias', 'obras de infraestrutura', 'montagem industrial',
+    'siderurgia', 'siderúrgica', 'florestal', 'celulose e papel', 'engenharia de campo',
+    'coordenador de campo', 'supervisor de obra', 'gestor de frota', 'coordenador de frota',
+    'diretor de operações', 'gerente de contratos',
   ];
-  const termosGenericos = ['frota', 'frotas', 'logística', 'logistica'];
+  const termosGenericos = ['frota', 'frotas', 'logística', 'logistica', 'obra', 'obras', 'campo'];
   const contextoB2B = [
     'empresa', 'corporativ', 'empresarial', 'terceiriz', 'locaç', 'locac', 'gestor', 'gestão',
     'gestao', 'setor', 'mercado', 'indústria', 'veículos', 'veiculos', 'automóv', 'automovel', 'carro',
+    'mineradora', 'geotecnia', 'infraestrutura', 'concessionária', 'concessionaria', 'siderúrgica',
+    'siderurgica', 'engenharia', 'operação', 'operacao',
   ];
   const palavrasExclusao = [
     'metrô', 'metro sp', 'metro rio', 'metrorj', 'metrorio', 'metrô de sp', 'metrô de são paulo',
@@ -118,6 +203,11 @@ function filtrarRelevancia(itens) {
     'van escolar', 'escolar', 'aplicativo de transporte', 'app de transporte', 'passes livres',
     'gratuidade', 'meia-passagem', 'meia passagem', 'vale-transporte', 'vale transporte',
     'estação de metrô', 'estacao de metro', 'virada cultural', 'litígio', 'litigio',
+    // DESQUALIFICA (ICP Let's, jul/2026): RH/carreira genérico, urbano executivo sem campo, foco em preço, MEI
+    'plano de carreira', 'rh estratégico', 'rh estrategico', 'gestão de pessoas', 'gestao de pessoas',
+    'employer branding', 'liderança feminina', 'lideranca feminina', 'carro popular', 'carro de passeio',
+    'mobilidade individual', 'microempreendedor individual', 'liquidação de veículos',
+    'liquidacao de veiculos', 'queima de estoque', 'carro mais barato', 'preço popular', 'preco popular',
   ];
   const termosBlindados = [
     'terceirização', 'terceirizacao', 'fleet', 'gestão de frota corporativa',
@@ -159,7 +249,7 @@ function filtrarRelevancia(itens) {
     return true;
   });
 
-  console.log(`Filtro relevância B2B v2: ${filtrados.length} de ${itens.length}`);
+  console.log(`Filtro relevância B2B v4 (ICP campo/mineração/compliance): ${filtrados.length} de ${itens.length}`);
   console.log(`  Aprovados por termo específico: ${aprovadosEspecifico}`);
   console.log(`  Aprovados por termo genérico + contexto: ${aprovadosGenerico}`);
   console.log(`  Descartados por conteúdo B2C: ${descartadosPorExclusao}`);
@@ -236,12 +326,13 @@ function filtrarConcorrentes(itens) {
 // ─── Nó "Enriquecer e Limitar" (janela adaptativa + caps + tema) ─
 const TEMAS = {
   Eletrificacao: ['eletric', 'eletrific', 'bateria', 'recarga', 'ev ', 'e-delivery', 'hibrido', 'biometano', 'gnl', 'gas natural', 'descarboniz', 'emissao', 'emissoes', 'co2', 'sustentavel', 'sustentabilidade'],
-  Regulacao: ['lei', 'regulament', 'tst', 'tribunal', 'norma', 'fiscal', 'tributa', 'imposto', 'receita federal', 'legisla', 'decreto', 'multa', 'compliance'],
+  Regulacao: ['lei', 'regulament', 'tst', 'tribunal', 'norma', 'fiscal', 'tributa', 'imposto', 'receita federal', 'legisla', 'decreto', 'multa', 'compliance', 'laudo', 'rac2', 'inspecao veicular', 'nr-12', 'nr12', 'qsms', 'licenciamento ambiental'],
   Tecnologia: ['telemetria', 'rastreamento', 'software', 'tms', 'plataforma', 'inteligencia artificial', ' ia ', 'automacao', 'robotica', 'digital', 'app', 'aplicativo', 'dados', 'data center'],
   Mercado: ['mercado', 'venda', 'vendas', 'crescimento', 'investiment', 'aporte', 'aquisicao', 'fusao', 'expansao', 'faturamento', 'receita', 'resultado', 'economia', 'pib'],
   RenovacaoFrota: ['compra', 'adquire', 'incorpora', 'renovacao', 'novos caminhoes', 'amplia frota', 'lote', 'unidades', 'aquisicao de veiculos'],
-  Custos: ['custo', 'diesel', 'combustivel', 'preco', 'reajuste', 'tarifa', 'pedagio', 'frete', 'despesa', 'inflacao'],
+  Custos: ['custo', 'diesel', 'combustivel', 'preco', 'reajuste', 'tarifa', 'pedagio', 'frete', 'despesa', 'inflacao', 'tco', 'manutencao corretiva', 'manutencao preventiva'],
   Logistica: ['logistica', 'supply chain', 'cadeia de suprimentos', 'armazen', 'cabotagem', 'porto', 'intermodal', 'distribuicao', 'cargas'],
+  OperacaoCampo: ['mineracao', 'mineradora', 'geotecnia', 'geotecnica', 'exploracao mineral', 'campo', 'obra', 'obras', 'canteiro', 'infraestrutura', 'siderurgia', 'siderurgica', 'florestal', 'celulose', 'concessao de rodovias', 'montagem industrial', 'engenharia de campo', 'terreno adverso', 'pickup 4x4', 'picape 4x4', '4x4'],
 };
 
 function classificarTema(a) {
@@ -341,13 +432,27 @@ async function main() {
     .map((r) => (r.url || r.titulo || '').toLowerCase().trim())
     .filter(Boolean);
 
-  // [9 RSS] → Padronizar → Calcular Idade → Relevância → Dedup → Concorrentes → Enriquecer
-  const brutos = await lerFeeds(FEEDS);
-  let artigos = padronizar(brutos);
+  // [9 RSS] + [Busca Web] → Padronizar → Calcular Idade → Relevância → Dedup → Concorrentes → Enriquecer
+  // Híbrido: RSS continua sendo a fonte principal; a busca web complementa
+  // buscando mais amplamente pela internet, sempre limitada aos últimos 7 dias.
+  // Ambas passam pelos MESMOS filtros de relevância/concorrentes abaixo, e o
+  // dedup por URL cobre o caso de um artigo aparecer nas duas fontes.
+  const [brutos, artigosWeb] = await Promise.all([lerFeeds(FEEDS), buscarArtigosWeb(7)]);
+  let artigos = [...padronizar(brutos), ...artigosWeb];
+  console.log(
+    `Fontes antes dos filtros: ${artigos.filter((a) => a._origem === 'rss').length} via RSS, ` +
+      `${artigos.filter((a) => a._origem === 'busca_web').length} via busca web`,
+  );
+
   artigos = calcularIdade(artigos);
   artigos = filtrarRelevancia(artigos);
   artigos = deduplicar(artigos, urlsHistoricas);
   artigos = filtrarConcorrentes(artigos);
+  console.log(
+    `Fontes após filtros: ${artigos.filter((a) => a._origem === 'rss').length} via RSS, ` +
+      `${artigos.filter((a) => a._origem === 'busca_web').length} via busca web`,
+  );
+
   const finais = enriquecerELimitar(artigos, edicaoAtual);
 
   if (finais.length === 0) {
@@ -360,7 +465,13 @@ async function main() {
   console.log(`✓ Salvo: ${res.inseridos} inseridos, ${res.atualizados} atualizados.`);
 }
 
-main().catch((e) => {
-  console.error('✗ WF-01 falhou:', e);
-  process.exit(1);
-});
+export { buscarArtigosWeb };
+
+// Só roda o pipeline completo quando este arquivo é executado diretamente
+// (permite importar buscarArtigosWeb isoladamente em scripts de teste).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((e) => {
+    console.error('✗ WF-01 falhou:', e);
+    process.exit(1);
+  });
+}

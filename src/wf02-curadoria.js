@@ -80,19 +80,25 @@ const deveDescartar = (r) => (r.status === 0 ? false : r.status >= 400);
 
 // ─── Prompts (verbatim do PROD-WF-02; carregam as regras de negócio) ──
 function promptCuradoria(artigos) {
-  return `Você é o editor de uma newsletter B2B voltada para gestores de frota empresarial, diretores de logística e CFOs de empresas que terceirizam veículos no Brasil. Sua audiência é composta por clientes da Let's (gestão de frotas do Grupo Águia Branca).
+  return `Você é o editor de uma newsletter B2B voltada para o público-alvo (ICP) da Let's (gestão de frotas do Grupo Águia Branca): empresas de médio/grande porte com 3 a 35 veículos em operação de campo contínua e terreno adverso (pickup 4x4, utilitários).
+
+Setores prioritários: Engenharia/Geotecnia, Mineração, Meio Ambiente.
+Setores secundários: Concessão de Rodovias, Obras/Montagem Industrial, Florestal/Celulose, Infraestrutura, Siderurgia.
+Quem lê: Gestor de Frota, Coordenador de Campo, QSMS, Engenheiro de Campo (influenciadores) e Diretor de Operações/Administrativo, Gerente Geral (decisores).
+
+DORES QUE ATIVAM (priorize artigos que tocam nisso): manutenção corretiva imprevisível comendo margem; veículo barrado por laudo/RAC2 vencido; carga de gerir implementação e documentação da frota; atendimento sem solução real; veículo parado em campo como risco de segurança; pickup fora da norma da operação.
 
 Avalie cada artigo e selecione os 7 mais relevantes seguindo:
-1. RELEVÂNCIA (40%): Impacto direto na decisão de terceirizar frota ou na operação
+1. RELEVÂNCIA PRA OPERAÇÃO DE CAMPO (40%): o artigo fala de TCO, RAC2/compliance e laudos, manutenção preventiva vs corretiva, gestão de frota em operação severa, ou de algum dos setores prioritários/secundários acima?
 2. ATUALIDADE (20%): Quanto mais recente, melhor
 3. AUTORIDADE DA FONTE (20%): Fontes especializadas valem mais
-4. ACIONABILIDADE (20%): O leitor pode fazer algo com a informação?
+4. ACIONABILIDADE (20%): O leitor (gestor de frota, coordenador de campo, engenheiro de campo) pode fazer algo com a informação na operação dele?
 
-Descarte: conteúdo promocional, cases de concorrente direta, notícias internacionais sem relevância pro Brasil.
+Descarte: conteúdo promocional, cases de concorrente direta, notícias internacionais sem relevância pro Brasil, conteúdo genérico de RH/carreira/mobilidade urbana sem relação com operação de campo, e qualquer artigo com foco central em preço (promoção, desconto, "mais barato").
 
 REGRA DE DIVERSIDADE DE FONTE: no máximo 2 matérias da mesma fonte entre as 7 escolhidas.
 
-REGRA DE DIVERSIDADE DE TEMA (CRÍTICA): cada artigo tem um campo "tema". Entre os 7 selecionados, NÃO concentre num único tema. Distribua entre temas diferentes (Eletrificacao, Regulacao, Tecnologia, Mercado, RenovacaoFrota, Custos, Logistica, Outros). O ideal é que os 3 PRINCIPAIS (top 3 por score) sejam de 3 temas DISTINTOS entre si. Se houver muitos artigos do mesmo tema, escolha o melhor de cada tema antes de repetir tema. Variedade temática é mais importante que pequenas diferenças de score.
+REGRA DE DIVERSIDADE DE TEMA (CRÍTICA): cada artigo tem um campo "tema". Entre os 7 selecionados, NÃO concentre num único tema. Distribua entre temas diferentes (Eletrificacao, Regulacao, Tecnologia, Mercado, RenovacaoFrota, Custos, Logistica, OperacaoCampo, Outros). O ideal é que os 3 PRINCIPAIS (top 3 por score) sejam de 3 temas DISTINTOS entre si. Se houver muitos artigos do mesmo tema, escolha o melhor de cada tema antes de repetir tema. Variedade temática é mais importante que pequenas diferenças de score. Ao empatar em score, prefira o artigo de tema OperacaoCampo ou Regulacao (mais alinhado ao ICP de operação de campo/compliance) sobre temas genéricos de mercado.
 
 IMPORTANTE: ordene os 7 selecionados pelo score (do maior pro menor), MAS respeitando a diversidade de tema nos 3 primeiros. Atribua scores diferenciados.
 
@@ -104,9 +110,18 @@ ${JSON.stringify(artigos, null, 2)}`;
 }
 
 function promptRedacao(selecionados) {
-  return `Você é o redator-chefe da newsletter 'Let's Insights', uma publicação semanal B2B da Let's (gestão de frotas do Grupo Águia Branca) voltada para gestores de frota, diretores de logística e tomadores de decisão.
+  return `Você é o redator-chefe da newsletter 'Let's Insights', uma publicação semanal B2B da Let's (gestão de frotas do Grupo Águia Branca) voltada para gestores de frota, coordenadores de campo, QSMS, engenheiros de campo e diretores de operações de empresas com frotas 4x4 em operação de campo (Engenharia/Geotecnia, Mineração, Meio Ambiente, Concessão de Rodovias, Obras/Montagem Industrial, Florestal/Celulose, Infraestrutura, Siderurgia).
 
-TOM DE VOZ: Profissional mas não engessado, direto sem floreios, autoridade sem arrogância, sempre traz camada de 'e o que isso significa pra você?', português brasileiro formal-acessível. NUNCA use travessão (—).
+TOM DE VOZ (guia oficial da marca, siga à risca):
+- Técnico, direto e confiável: fale como especialista de operação conversando com outro especialista de operação, nunca como vendedor.
+- Profissional sem ser formal demais, sem jargão de marketing.
+- Sempre traga a camada "e o que isso significa pra sua operação?" (impacto prático em campo, não abstrato).
+- NUNCA prometa o que não pode entregar.
+- NUNCA use superlativo vazio ("melhor", "líder", "número 1") nem linguagem de venda genérica (ex: "5 vantagens de...", "temos a solução perfeita pra sua empresa!").
+- NUNCA fale de preço antes de falar de operação. Preço não é gancho de manchete nem de resumo.
+- NUNCA use travessão (—).
+- Exemplos de tom certo: "Como calcular o TCO real de uma frota 4x4 em operação de campo", "RAC2: o que é e por que seu veículo precisa estar em conformidade", "Um laudo vencido pode parar sua equipe inteira".
+- Exemplos de tom errado (evite): "5 vantagens de terceirizar veículos", "Temos a solução perfeita pra sua empresa!", qualquer superlativo ou foco em preço.
 
 REGRAS DE COPYRIGHT (CRÍTICO): NUNCA copie trechos literais. SEMPRE parafraseie. Cite a fonte ao final.
 
@@ -143,8 +158,8 @@ Gere também:
 2. PRÉ-HEADER (máx 90 caracteres, vira preview no inbox)
 
 3. CTA_FINAL (chamada pra falar com especialista Let's)
-   - titulo (pergunta provocativa, máx 60 chars)
-   - texto (2 frases explicando o que oferece)
+   - titulo (pergunta provocativa ligada a um problema de operação de campo, ex: manutenção corretiva, laudo/RAC2 vencido, veículo parado em campo; NUNCA sobre preço, máx 60 chars)
+   - texto (2 frases sobre a operação: veículo pronto pra operar, consultor dedicado, documentação/laudos resolvidos; sem falar de preço)
    - botao (texto do botão, ex: "FALAR COM ESPECIALISTA")
 
 Retorne APENAS JSON válido (sem markdown):

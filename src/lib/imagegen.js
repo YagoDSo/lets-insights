@@ -9,10 +9,12 @@ const MODEL = 'gemini-2.5-flash-image';
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
 function montarPrompt({ titulo, categoria, tema }) {
-  return `Fotografia editorial profissional para newsletter B2B de gestão de frotas de veículos comerciais no Brasil. ` +
-    `Tema da matéria: ${tema || categoria || 'logística'}. Contexto: "${titulo}". ` +
-    `Estilo corporativo, realista, sem texto nem logotipos na imagem, iluminação natural, paleta neutra ` +
-    `compatível com identidade visual laranja (#f15a22) e cinza. Formato quadrado.`;
+  return `Fotografia editorial profissional para newsletter B2B de gestão de frotas 4x4 em operação de campo no Brasil ` +
+    `(mineração, geotecnia, obras de infraestrutura, meio ambiente, terreno adverso). ` +
+    `Tema da matéria: ${tema || categoria || 'operação de frota'}. Contexto: "${titulo}". ` +
+    `Priorize cenas de pickup/utilitário 4x4 em campo, canteiro de obra ou operação técnica ao ar livre quando fizer sentido pro tema; ` +
+    `evite escritório genérico ou trânsito urbano. Estilo corporativo, realista, sem texto nem logotipos na imagem, ` +
+    `iluminação natural, paleta neutra compatível com identidade visual laranja (#f15a22) e cinza. Formato quadrado.`;
 }
 
 export async function gerarImagemPorTema({ titulo, categoria, tema }) {
