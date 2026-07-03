@@ -1,8 +1,8 @@
 import Database from 'better-sqlite3';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
+import { git, gitOutput } from './gitBin.js';
 
 // ─────────────────────────────────────────────────────────────
 // Camada de banco de dados. Arquivo SQLite commitado no próprio repositório
@@ -93,10 +93,6 @@ export async function upsertLinhas(tabela, objetos, colChave) {
   return { atualizados, inseridos };
 }
 
-function git(args) {
-  execFileSync('git', args, { stdio: 'inherit' });
-}
-
 // Commita e dá push do arquivo .db se ele tiver mudado. Mesmo padrão de
 // identidade de bot usado em lib/gitAssets.js pra imagens geradas.
 export function commitarBanco(mensagem) {
@@ -104,9 +100,7 @@ export function commitarBanco(mensagem) {
   _db = undefined;
 
   if (!fs.existsSync(config.dbPath)) return;
-  const status = execFileSync('git', ['status', '--porcelain', '--', config.dbPath])
-    .toString()
-    .trim();
+  const status = gitOutput(['status', '--porcelain', '--', config.dbPath]).trim();
   if (!status) {
     console.log('Banco de dados sem alterações. Nada a commitar.');
     return;
