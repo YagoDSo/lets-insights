@@ -18,6 +18,19 @@ const formatarEdicaoExtenso = (edicaoStr) => {
   return `EDIÇÃO ${edicaoStr} · ${dia} ${mes} ${ano}`;
 };
 
+// ─── Sanitização: todo texto/URL abaixo vem de RSS/busca web/scraping
+// (fontes externas) reescrito pela IA, que parafraseia mas não garante
+// remover HTML. Sem isso, um artigo malicioso injetaria HTML/links no
+// e-mail enviado pra base inteira de assinantes. ──────────────────────
+const ESCAPES_HTML = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const esc = (valor) => String(valor ?? '').replace(/[&<>"']/g, (c) => ESCAPES_HTML[c]);
+
+// Só aceita http(s); qualquer outro esquema (javascript:, data:, etc.) vira '#'.
+const safeURL = (url) => {
+  const s = String(url ?? '').trim();
+  return /^https?:\/\//i.test(s) ? esc(s) : '#';
+};
+
 const renderPrincipal = (art, isLast, idx) => {
   const padBaixo = isLast ? '0 32px 8px' : '0 32px';
   return `
@@ -26,25 +39,25 @@ const renderPrincipal = (art, isLast, idx) => {
       <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
         <tr>
           <td valign="top" width="160" class="mob-stack mob-img-full" style="width:160px;padding-right:22px;">
-            <a href="${art.url}" target="_blank" style="text-decoration:none;"><img src="${art.imagem}" alt="${art.categoria || 'Notícia'}" width="160" height="160" style="display:block;width:160px;height:160px;border-radius:6px;object-fit:cover;border:0;" /></a>
+            <a href="${safeURL(art.url)}" target="_blank" style="text-decoration:none;"><img src="${safeURL(art.imagem)}" alt="${esc(art.categoria || 'Notícia')}" width="160" height="160" style="display:block;width:160px;height:160px;border-radius:6px;object-fit:cover;border:0;" /></a>
           </td>
           <td valign="top" class="mob-stack mob-mt-16">
             <div style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:10.5px;font-weight:700;color:#f15a22;letter-spacing:0.16em;text-transform:uppercase;margin-bottom:8px;">
-              ${art.categoria || 'Notícia'}
+              ${esc(art.categoria || 'Notícia')}
             </div>
             <div class="dm-text-primary" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:17px;letter-spacing:0.04em;text-transform:uppercase;color:#12100b;line-height:1.2;margin-bottom:10px;">
-              ${art.subtitulo}
+              ${esc(art.subtitulo)}
             </div>
             <p class="dm-text-body" style="margin:0 0 14px;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:13px;line-height:1.55;color:#4a4a52;">
-              ${art.resumo}
+              ${esc(art.resumo)}
             </p>
             <!--[if mso]>
-            <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${art.url}" style="height:44px;v-text-anchor:middle;width:150px;" arcsize="8%" stroke="f" fillcolor="#f15a22"><w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI,Arial,sans-serif;font-size:13px;font-weight:bold;letter-spacing:0.5px;">Ler matéria</center></v:roundrect>
+            <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${safeURL(art.url)}" style="height:44px;v-text-anchor:middle;width:150px;" arcsize="8%" stroke="f" fillcolor="#f15a22"><w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI,Arial,sans-serif;font-size:13px;font-weight:bold;letter-spacing:0.5px;">Ler matéria</center></v:roundrect>
             <![endif]-->
             <!--[if !mso]><!-- -->
-            <a href="${art.url}?utm_source=newsletter&utm_medium=email&utm_campaign=insights&utm_content=principal_${idx + 1}" target="_blank" style="background-color:#f15a22;color:#ffffff;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:0.04em;text-decoration:none;padding:10px 20px;border-radius:3px;display:inline-block;mso-hide:all;">Ler matéria</a>
+            <a href="${safeURL(art.url)}?utm_source=newsletter&utm_medium=email&utm_campaign=insights&utm_content=principal_${idx + 1}" target="_blank" style="background-color:#f15a22;color:#ffffff;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:0.04em;text-decoration:none;padding:10px 20px;border-radius:3px;display:inline-block;mso-hide:all;">Ler matéria</a>
             <!--<![endif]-->
-            <div style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:11px;color:#888;margin-top:10px;">Fonte: ${art.fonte}</div>
+            <div style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:11px;color:#888;margin-top:10px;">Fonte: ${esc(art.fonte)}</div>
           </td>
         </tr>
       </table>
@@ -56,19 +69,19 @@ const renderPrincipal = (art, isLast, idx) => {
 
 const renderCard = (art, idx) => `
     <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
-      <tr><td><a href="${art.url}" target="_blank" style="text-decoration:none;"><img src="${art.imagem}" alt="${art.categoria || 'Notícia'}" width="100%" height="120" style="display:block;width:100%;height:120px;object-fit:cover;border:0;" /></a></td></tr>
+      <tr><td><a href="${safeURL(art.url)}" target="_blank" style="text-decoration:none;"><img src="${safeURL(art.imagem)}" alt="${esc(art.categoria || 'Notícia')}" width="100%" height="120" style="display:block;width:100%;height:120px;object-fit:cover;border:0;" /></a></td></tr>
       <tr><td style="height:14px;font-size:0;line-height:0;">&nbsp;</td></tr>
-      <tr><td class="dm-text-primary" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:14px;letter-spacing:0.08em;text-transform:uppercase;color:#12100b;padding-bottom:10px;">${art.categoria || 'Notícia'}</td></tr>
-      <tr><td class="dm-text-body" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:12.5px;line-height:1.5;color:#4a4a52;padding-bottom:14px;">${art.resumo}</td></tr>
+      <tr><td class="dm-text-primary" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:14px;letter-spacing:0.08em;text-transform:uppercase;color:#12100b;padding-bottom:10px;">${esc(art.categoria || 'Notícia')}</td></tr>
+      <tr><td class="dm-text-body" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:12.5px;line-height:1.5;color:#4a4a52;padding-bottom:14px;">${esc(art.resumo)}</td></tr>
       <tr><td>
         <!--[if mso]>
-        <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${art.url}" style="height:44px;v-text-anchor:middle;width:150px;" arcsize="8%" stroke="f" fillcolor="#f15a22"><w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI,Arial,sans-serif;font-size:13px;font-weight:bold;letter-spacing:0.5px;">Ler matéria</center></v:roundrect>
+        <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${safeURL(art.url)}" style="height:44px;v-text-anchor:middle;width:150px;" arcsize="8%" stroke="f" fillcolor="#f15a22"><w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI,Arial,sans-serif;font-size:13px;font-weight:bold;letter-spacing:0.5px;">Ler matéria</center></v:roundrect>
         <![endif]-->
         <!--[if !mso]><!-- -->
-        <a href="${art.url}?utm_source=newsletter&utm_medium=email&utm_campaign=insights&utm_content=card_${idx + 1}" target="_blank" style="background-color:#f15a22;color:#ffffff;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:0.04em;text-decoration:none;padding:10px 20px;border-radius:3px;display:inline-block;mso-hide:all;">Ler matéria</a>
+        <a href="${safeURL(art.url)}?utm_source=newsletter&utm_medium=email&utm_campaign=insights&utm_content=card_${idx + 1}" target="_blank" style="background-color:#f15a22;color:#ffffff;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:0.04em;text-decoration:none;padding:10px 20px;border-radius:3px;display:inline-block;mso-hide:all;">Ler matéria</a>
         <!--<![endif]-->
       </td></tr>
-      <tr><td style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:11px;color:#888;padding-top:10px;">Fonte: ${art.fonte}</td></tr>
+      <tr><td style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:11px;color:#888;padding-top:10px;">Fonte: ${esc(art.fonte)}</td></tr>
     </table>
 `;
 
@@ -100,18 +113,18 @@ export function montarHTML(dados) {
       <tr>
         <td style="padding:2px;">
           <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="#ffffff" class="dm-body-bg" style="background-color:#ffffff;border-radius:3px;">
-            <tr><td><a href="${blogPost.url}" target="_blank" style="text-decoration:none;display:block;"><img src="${blogPost.imagem}" alt="Blog Lets" width="100%" height="120" style="display:block;width:100%;height:120px;object-fit:cover;border:0;" /></a></td></tr>
+            <tr><td><a href="${safeURL(blogPost.url)}" target="_blank" style="text-decoration:none;display:block;"><img src="${safeURL(blogPost.imagem)}" alt="Blog Lets" width="100%" height="120" style="display:block;width:100%;height:120px;object-fit:cover;border:0;" /></a></td></tr>
             <tr><td style="height:12px;font-size:0;line-height:0;">&nbsp;</td></tr>
             <tr><td style="padding:0 12px;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:#f15a22;">★ Última do Blog Lets</td></tr>
             <tr><td style="height:8px;font-size:0;line-height:0;">&nbsp;</td></tr>
-            <tr><td class="dm-text-primary" style="padding:0 12px;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:13.5px;line-height:1.35;color:#12100b;">${blogPost.titulo}</td></tr>
+            <tr><td class="dm-text-primary" style="padding:0 12px;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:13.5px;line-height:1.35;color:#12100b;">${esc(blogPost.titulo)}</td></tr>
             <tr><td style="height:14px;font-size:0;line-height:0;">&nbsp;</td></tr>
             <tr><td style="padding:0 12px 14px 12px;">
               <!--[if mso]>
-              <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${blogPost.url}" style="height:44px;v-text-anchor:middle;width:150px;" arcsize="8%" stroke="f" fillcolor="#f15a22"><w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI,Arial,sans-serif;font-size:13px;font-weight:bold;letter-spacing:0.5px;">Ler artigo</center></v:roundrect>
+              <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${safeURL(blogPost.url)}" style="height:44px;v-text-anchor:middle;width:150px;" arcsize="8%" stroke="f" fillcolor="#f15a22"><w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI,Arial,sans-serif;font-size:13px;font-weight:bold;letter-spacing:0.5px;">Ler artigo</center></v:roundrect>
               <![endif]-->
               <!--[if !mso]><!-- -->
-              <a href="${blogPost.url}" target="_blank" style="background-color:#f15a22;color:#ffffff;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:0.04em;text-decoration:none;padding:10px 20px;border-radius:3px;display:inline-block;mso-hide:all;">Ler artigo</a>
+              <a href="${safeURL(blogPost.url)}" target="_blank" style="background-color:#f15a22;color:#ffffff;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:0.04em;text-decoration:none;padding:10px 20px;border-radius:3px;display:inline-block;mso-hide:all;">Ler artigo</a>
               <!--<![endif]-->
             </td></tr>
           </table>
@@ -154,7 +167,7 @@ export function montarHTML(dados) {
   <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
   <meta name="color-scheme" content="light dark">
   <meta name="supported-color-schemes" content="light dark">
-  <title>${dados.titulo_edicao}</title>
+  <title>${esc(dados.titulo_edicao)}</title>
 
   <!--[if mso]>
   <noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript>
@@ -209,7 +222,7 @@ export function montarHTML(dados) {
 <body class="dm-canvas-bg" style="margin:0;padding:0;background-color:#e9e9ec;font-family:'Open Sans','Segoe UI',Arial,sans-serif;">
 
   <div style="display:none;font-size:1px;color:#e9e9ec;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">
-    ${preHeader}
+    ${esc(preHeader)}
     &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847;
   </div>
 
@@ -233,7 +246,7 @@ export function montarHTML(dados) {
                     </table>
                   </td>
                   <td valign="middle" align="right" class="mob-hide" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;text-align:right;">
-                    <div style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:13px;color:#ffffff;letter-spacing:0.06em;text-transform:uppercase;white-space:nowrap;line-height:1.2;">${edicaoFormatada}</div>
+                    <div style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:13px;color:#ffffff;letter-spacing:0.06em;text-transform:uppercase;white-space:nowrap;line-height:1.2;">${esc(edicaoFormatada)}</div>
                   </td>
                 </tr>
               </table>
@@ -247,10 +260,10 @@ export function montarHTML(dados) {
           <tr>
             <td bgcolor="#eeeeef" class="dm-editorial-bg" style="background-color:#eeeeef;padding:36px 40px 40px;text-align:center;" align="center">
               <div class="dm-text-primary" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:800;font-size:20px;line-height:1.25;color:#12100b;letter-spacing:-0.01em;margin-bottom:14px;max-width:460px;margin-left:auto;margin-right:auto;">
-                ${cta.titulo}
+                ${esc(cta.titulo)}
               </div>
               <p class="dm-text-body" style="margin:0 auto 24px;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:13.5px;line-height:1.6;color:#4a4a52;max-width:460px;">
-                ${cta.texto || ''}
+                ${esc(cta.texto || '')}
               </p>
               <!--[if mso]>
               <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="https://www.lets.com.br/solicitar-proposta" style="height:52px;v-text-anchor:middle;width:320px;" arcsize="8%" stroke="f" fillcolor="#f15a22"><w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI, Arial, sans-serif;font-size:13px;font-weight:bold;letter-spacing:1px">FALAR COM ESPECIALISTA</center></v:roundrect>
@@ -308,9 +321,14 @@ export function montarHTML(dados) {
 </body>
 </html>`;
 
+  // Remove quebras de linha do assunto: vira header de e-mail (Subject:), e
+  // titulo_edicao é influenciado por conteúdo externo (RSS/busca web) via a
+  // reescrita da IA, então não dá pra confiar que nunca vem com \r\n.
+  const semQuebraDeLinha = (s) => String(s ?? '').replace(/[\r\n]+/g, ' ').trim();
+
   return {
     edicao: dados.edicao,
-    assunto_preview: `[Ed. ${dados.edicao}] ${dados.titulo_edicao}`,
+    assunto_preview: semQuebraDeLinha(`[Ed. ${dados.edicao}] ${dados.titulo_edicao}`),
     titulo_edicao: dados.titulo_edicao,
     pre_header: preHeader,
     html_final,
