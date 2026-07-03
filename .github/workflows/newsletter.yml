@@ -29,6 +29,9 @@ jobs:
   wf02-curadoria:
     needs: wf01-coleta
     runs-on: ubuntu-latest
+    # contents:write necessário pra commitar a imagem gerada via IA (fallback) — ver lib/gitAssets.js
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -40,6 +43,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_MODEL: ${{ secrets.CLAUDE_MODEL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SHEETS_DOC_ID: ${{ secrets.SHEETS_DOC_ID }}
 

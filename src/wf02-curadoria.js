@@ -9,6 +9,12 @@ import { config, requireEnv } from './lib/config.js';
 import { lerAba, upsertLinhas } from './lib/store.js';
 import { chamarClaude } from './lib/claude.js';
 import { repairJSON } from './lib/repair.js';
+import { gerarImagemPorTema } from './lib/imagegen.js';
+import { commitarImagensGeradas } from './lib/gitAssets.js';
+
+const DIACRITICOS = new RegExp('[̀-ͯ]', 'g');
+const removerAcentos = (s) => s.normalize('NFD').replace(DIACRITICOS, '');
+const slugify = (s) => removerAcentos(s || 'geral').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
 // ─── Buscar HTML do Artigo (GET, tolerante a falha, timeout 15s) ─
 async function buscarHTML(url) {
@@ -252,6 +258,33 @@ async function main() {
   }
   if (validados.length === 0) {
     throw new Error('Todos os artigos foram descartados na validação. Verifique o WF-01.');
+  }
+
+  // "Gerar Imagem Fallback (IA)": artigos sem imagem válida entre os 6 que
+  // serão usados (posição 6 é backup e é descartada na redação) recebem
+  // imagem gerada via Gemini, hospedada no próprio repo (raw.githubusercontent.com).
+  const semImagem = validados.filter((a) => !a.imagem && a.posicao < 6);
+  if (semImagem.length > 0) {
+    console.log(`\nGerando ${semImagem.length} imagem(ns) via IA (Gemini) para artigos sem imagem...`);
+    const arquivos = [];
+    for (const artigo of semImagem) {
+      const { buffer, ext } = await gerarImagemPorTema({
+        titulo: artigo.titulo_original,
+        categoria: artigo.categoria,
+        tema: artigo.tema,
+      });
+      arquivos.push({
+        nomeArquivo: `ed${edicaoAtual}-pos${artigo.posicao}-${slugify(artigo.tema)}.${ext}`,
+        buffer,
+        posicao: artigo.posicao,
+      });
+    }
+    const urls = commitarImagensGeradas(arquivos);
+    for (const { nomeArquivo, posicao } of arquivos) {
+      const alvo = validados.find((a) => a.posicao === posicao);
+      alvo.imagem = urls[nomeArquivo];
+      console.log(`  [${posicao}] imagem gerada: ${urls[nomeArquivo]}`);
+    }
   }
 
   // "Preparar Redação" + "Claude API - Redação"

@@ -43,13 +43,16 @@ No repo → **Settings → Secrets and variables → Actions → New repository 
 |---|---|
 | `ANTHROPIC_API_KEY` | a chave da Claude API |
 | `CLAUDE_MODEL` | `claude-sonnet-4-5-20250929` (opcional) |
+| `GEMINI_API_KEY` | chave do Gemini API (Google AI Studio) — geração de imagem fallback, ver `lib/imagegen.js` |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | **conteúdo inteiro** do arquivo `google-service-account.json` |
 | `SHEETS_DOC_ID` | `1xSjvbZwI-3oLScimPcpBftB2E4muLV07dt1ZOVo3N5s` |
-| `GMAIL_USER` | `yagod@lets.com.br` (só pro WF-03) |
+| `GMAIL_USER` | e-mail remetente do preview (só pro WF-03) |
 | `GMAIL_APP_PASSWORD` | senha de app do Gmail (só pro WF-03, ver abaixo) |
-| `PREVIEW_TO` | destinatário do preview |
+| `PREVIEW_TO` | destinatário(s) do preview (separados por vírgula) |
 
 > O `store.js` usa `GOOGLE_SERVICE_ACCOUNT_JSON` (CI) se existir; senão cai no `GOOGLE_APPLICATION_CREDENTIALS` (arquivo local). Os dois modos funcionam.
+
+> O job `wf02-curadoria` do GitHub Actions precisa de `permissions: contents: write` (já configurado no `newsletter.yml`) — o passo de fallback de imagem commita e dá push no próprio repositório (pasta `public/generated/`). Por isso o repositório **precisa ser público**: `raw.githubusercontent.com` não serve arquivos de repo privado sem autenticação.
 
 ## 5. Gmail App Password (deixar pro WF-03)
 

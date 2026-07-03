@@ -32,6 +32,8 @@ A automação roda em **N8N Cloud** e é composta por **3 workflows** que rodam 
   - Aba **Artigos_Coletados** — gid `1508227275` — colunas: `edicao, data_coleta, titulo, url, fonte, data_publicacao, resumo, status, tema`
 - **E-goi** — disparo de produção (futuro). **Gmail** — preview atual.
 - **CDN de imagens** (logo, ícones): SendGrid account `aead0c601c58f7b7`.
+- **Gemini API** (`gemini-2.5-flash-image`, "Nano Banana") — geração de imagem fallback quando artigo não tem imagem própria válida. Ver `src/lib/imagegen.js`.
+- **Repositório GitHub `YagoDSo/lets-insights`: PÚBLICO** (desde jul/2026, decisão deliberada — ver "Decisões fechadas"). Imagens geradas pela IA são commitadas em `public/generated/` e servidas via `raw.githubusercontent.com`, que só funciona em repo público.
 
 ## Regras inegociáveis do projeto
 
@@ -44,7 +46,7 @@ A automação roda em **N8N Cloud** e é composta por **3 workflows** que rodam 
 7. **Assunto:** padrão `Let's Insights · [destaque]` com **ponto médio U+00B7** (não hífen).
 8. **ClickUp:** **NUNCA** criar/editar/ler/mover/comentar tasks **sem autorização explícita do Yago na mensagem específica** — mesmo que pareça implícito. Sempre ler uma task antes de atualizar. (Workspace 36916834; tasks de referência: `86ahfmnwx` projeto, `86ahderm5` log de resultados.)
 9. **Integrações:** nunca inventar capacidades/APIs. Verificar viabilidade antes de propor.
-10. **Decisões fechadas:** schedules independentes (não encadear), modelo Sonnet 4.5, Google Sheets como banco (não migrar para Airtable/Supabase/Notion por enquanto).
+10. **Decisões fechadas:** schedules independentes (não encadear) *(pré-migração; ver nota no fim do arquivo)*, modelo Sonnet 4.5, Google Sheets como banco (não migrar para Airtable/Supabase/Notion por enquanto), repositório GitHub público (necessário pra hospedar imagens fallback via `raw.githubusercontent.com` — decisão tomada cientes de que expõe código/prompts/regras de negócio; credenciais seguem só em Secrets).
 
 ## Como o Yago gosta de trabalhar (preferências)
 
@@ -106,7 +108,7 @@ Toda Segunda 06:06 → Ler Todas as Edições1 → Validar e Selecionar Edição
 1. **Filtro de relevância (WF-01):** existem duas versões. **v2** (rigoroso, exige contexto B2B adjacente a termos genéricos) deixava passar só ~3 artigos. **v3** (termos centrais aceitos diretamente, exclusão B2C só para transporte público de passageiros, normalização de acento consistente) resolveu — passou para ~9 artigos. **Confirme qual está no `jsCode` do nó antes de diagnosticar escassez de artigos.**
 2. **`matchingColumns` (WF-01 Salvar):** tem que ser **`url`** na aba Artigos_Coletados. Se estiver `edicao` (ou vazio), o Sheets sobrescreve linhas da mesma edição e só salva 1-3 artigos.
 3. **WF-03 "Atualizar Status1":** há inconsistência — `documentId` aponta para aba Edicoes mas `sheetName.value` é o gid de Artigos_Coletados, com `matchingColumns=['edicao']`. Gera linhas-fantasma. **Correção pendente:** apontar consistentemente para a aba Edicoes.
-4. **Fallback de imagem (WF-02 Parse Edição Final):** versão anterior tinha `aplicarFallback()` para trocar imagem null pelo fallback; sumiu da versão atual. Decidir se reinclui.
+4. ~~**Fallback de imagem (WF-02 Parse Edição Final):** versão anterior tinha `aplicarFallback()` para trocar imagem null pelo fallback; sumiu da versão atual.~~ **RESOLVIDO (jul/2026):** artigos sem imagem válida (posições 0-5, backup na posição 6 é ignorado) agora geram imagem via Gemini API (`gerarImagemPorTema` em `src/lib/imagegen.js`), commitada em `public/generated/` e servida via `raw.githubusercontent.com` (`src/lib/gitAssets.js`). Passo roda dentro do `wf02-curadoria.js`, entre "Validar URLs Vivas" e "Preparar Redação". Requer `GEMINI_API_KEY` e permissão `contents: write` no job do GitHub Actions (já configurado no `newsletter.yml`).
 5. **Paired item errors (N8N 2.27):** se aparecer "Paired item data... unavailable", a causa é nó Code sem `pairedItem: {item: i}` declarado, ou referência `$('Nó').item` a nó fora da cadeia direta. Solução: usar `.first()`, declarar `pairedItem`, referenciar só nós da cadeia.
 6. **Hotlink 403 (Frota&Cia, Logweb no Outlook):** limitação do servidor da fonte ao baixar imagem sem referrer. Aceito como conhecido.
 
@@ -121,6 +123,8 @@ Toda Segunda 06:06 → Ler Todas as Edições1 → Validar e Selecionar Edição
 - N8N Cloud bloqueia requisição direta a domínios externos no editor de teste — não dá para validar feed RSS de fora; verificar `/feed/` no browser.
 - Outlook ignora padding de TD externa antes de tabela MSO — reduzir width da tabela MSO e pôr padding direto nas TDs MSO internas.
 - `repairJSON()` é necessário para parsear com robustez a saída JSON do Claude.
+- `raw.githubusercontent.com` **não serve arquivos de repositório privado** sem autenticação (não dá pra passar Authorization header num `<img src>` de e-mail). Só funciona se o repo for público — daí a decisão de tornar `lets-insights` público em jul/2026.
+- Commits automáticos de CI (imagens geradas) usam identidade `Lets Insights Bot <bot@lets.com.br>` via `git config` no próprio script (`src/lib/gitAssets.js`), pra diferenciar de commits manuais do Yago no histórico.
 
 ## Pendências / backlog
 

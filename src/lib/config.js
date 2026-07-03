@@ -6,6 +6,9 @@ export const config = {
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   claudeModel: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929',
 
+  // Gemini API (geração de imagem fallback — ver lib/imagegen.js)
+  geminiApiKey: process.env.GEMINI_API_KEY,
+
   // Banco de dados (hoje Google Sheets — ver lib/store.js)
   sheetsDocId: process.env.SHEETS_DOC_ID || '1xSjvbZwI-3oLScimPcpBftB2E4muLV07dt1ZOVo3N5s',
   abaEdicoes: process.env.SHEETS_ABA_EDICOES || 'Edicoes',
