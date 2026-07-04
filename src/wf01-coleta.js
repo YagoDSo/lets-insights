@@ -227,12 +227,19 @@ function filtrarRelevancia(itens) {
     'coordenador de campo', 'supervisor de obra', 'gestor de frota', 'coordenador de frota',
     'diretor de operações', 'gerente de contratos',
   ];
-  const termosGenericos = ['frota', 'frotas', 'logística', 'logistica', 'obra', 'obras', 'campo'];
+  const termosGenericos = [
+    'frota', 'frotas', 'logística', 'logistica', 'obra', 'obras', 'campo',
+    // Loosening (jul/2026): categorias centrais do ICP que ainda dependiam só de match específico.
+    'caminhão', 'caminhao', 'caminhões', 'caminhoes', 'ônibus', 'onibus',
+    'rodovia', 'rodovias', 'mineral', 'celulose',
+  ];
   const contextoB2B = [
     'empresa', 'corporativ', 'empresarial', 'terceiriz', 'locaç', 'locac', 'gestor', 'gestão',
     'gestao', 'setor', 'mercado', 'indústria', 'veículos', 'veiculos', 'automóv', 'automovel', 'carro',
     'mineradora', 'geotecnia', 'infraestrutura', 'concessionária', 'concessionaria', 'siderúrgica',
     'siderurgica', 'engenharia', 'operação', 'operacao',
+    // Loosening (jul/2026): acompanham notícia legítima de indústria/comércio B2B.
+    'produção', 'producao', 'investimento', 'comercial',
   ];
   const palavrasExclusao = [
     'metrô', 'metro sp', 'metro rio', 'metrorj', 'metrorio', 'metrô de sp', 'metrô de são paulo',
