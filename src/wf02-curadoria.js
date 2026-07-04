@@ -190,7 +190,14 @@ Retorne APENAS JSON válido (sem markdown):
 }
 
 ARTIGOS (ordenados por score):
-${JSON.stringify(selecionados, null, 2)}`;
+${JSON.stringify(
+  // score/justificativa/posicao são metadado interno da curadoria — a redação
+  // não usa nenhum dos três (não estão no formato de saída pedido acima) e
+  // são só tokens de input desperdiçados nesta chamada.
+  selecionados.map(({ score, justificativa, posicao, ...resto }) => resto),
+  null,
+  2,
+)}`;
 }
 
 // ─── Orquestração ────────────────────────────────────────────

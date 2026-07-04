@@ -29,13 +29,20 @@ export async function chamarClaude(prompt, { maxTokens = 4000, model = config.cl
 }
 
 // Mesma coisa, mas com a tool nativa "web_search" da API (server-side, cobrada
-// à parte — ver docs). Usa a variante básica (web_search_20250305) porque o
-// modelo pinado (Sonnet 4.5) não é elegível pra variante com dynamic filtering.
+// à parte — ver docs). Usa a variante básica (web_search_20250305) porque
+// nem Haiku 4.5 nem o Sonnet 4.5 usado no resto do pipeline são elegíveis pra
+// variante com dynamic filtering (exige Opus 4.6+/Sonnet 5/Sonnet 4.6).
+// Modelo default é Haiku 4.5 (config.claudeModelBusca), não o Sonnet 4.5 do
+// resto do pipeline: essa chamada é extração/filtragem estruturada (achar
+// artigos, confirmar data), não redação, e o conteúdo das páginas buscadas
+// já domina o custo de input (~107k tokens observados) — Haiku é 3x mais
+// barato no input pro mesmo trabalho. Ver CLAUDE.md "Otimização de custo de
+// tokens (jul/2026)".
 // Cobre o stop_reason "pause_turn" (loop de busca do servidor pausa a cada 10
 // buscas) reenviando o turno, conforme documentado pela Anthropic.
 export async function chamarClaudeComWebSearch(
   prompt,
-  { maxTokens = 8000, model = config.claudeModel, maxBuscas = 15 } = {},
+  { maxTokens = 8000, model = config.claudeModelBusca, maxBuscas = 15 } = {},
 ) {
   const c = client();
   const tools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: maxBuscas }];
