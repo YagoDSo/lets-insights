@@ -1,26 +1,25 @@
-// Teste rápido de conexão com o Google Sheets.
+// Teste rápido de conexão com o banco SQLite.
 // Uso: npm run test-conexao
-// Confirma que a Service Account tem acesso e lê o cabeçalho + contagem das abas.
+// Confirma que o arquivo abre e lê as tabelas artigos_coletados/edicoes.
 import { config } from './lib/config.js';
-import { lerAba } from './lib/store.js';
+import { lerAba } from './lib/db.js';
 
 async function main() {
-  console.log(`Doc ID: ${config.sheetsDocId}`);
+  console.log(`Arquivo do banco: ${config.dbPath}`);
 
-  for (const aba of [config.abaArtigos, config.abaEdicoes]) {
+  for (const tabela of [config.abaArtigos, config.abaEdicoes]) {
     try {
-      const { header, rows } = await lerAba(aba);
-      console.log(`\n✓ Aba "${aba}" acessível.`);
+      const { header, rows } = await lerAba(tabela);
+      console.log(`\n✓ Tabela "${tabela}" acessível.`);
       console.log(`  Colunas: ${header.join(', ') || '(vazia)'}`);
       console.log(`  Linhas de dados: ${rows.length}`);
     } catch (e) {
-      console.log(`\n✗ Falha ao ler "${aba}": ${e.message}`);
+      console.log(`\n✗ Falha ao ler "${tabela}": ${e.message}`);
     }
   }
 }
 
 main().catch((e) => {
   console.error('✗ Conexão falhou:', e.message);
-  console.error('Verifique: (1) Sheets API ativada, (2) planilha compartilhada com o e-mail da Service Account como Editor, (3) credencial no .env.');
   process.exit(1);
 });

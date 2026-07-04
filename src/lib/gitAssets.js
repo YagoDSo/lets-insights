@@ -1,6 +1,6 @@
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { git } from './gitBin.js';
 
 // ─────────────────────────────────────────────────────────────
 // Hospeda imagens geradas (ver lib/imagegen.js) commitando-as no próprio
@@ -10,10 +10,6 @@ import path from 'node:path';
 const REPO = process.env.GITHUB_REPOSITORY || 'YagoDSo/lets-insights';
 const BRANCH = 'main';
 const DIR = 'public/generated';
-
-function git(args) {
-  execFileSync('git', args, { stdio: 'inherit' });
-}
 
 // arquivos: [{ nomeArquivo, buffer }] → retorna { nomeArquivo: urlPublica }
 export function commitarImagensGeradas(arquivos) {

@@ -12,10 +12,10 @@ Migração do pipeline de **N8N Cloud** para **Node.js + GitHub Actions**.
 
 ## Camadas trocáveis (roadmap)
 
-- `src/lib/store.js` — banco de dados. **Hoje:** Google Sheets. **Depois:** Postgres/Supabase.
+- `src/lib/db.js` — banco de dados. **Hoje:** SQLite (`data/newsletter.db`, commitado no repo pelo próprio bot a cada rodada).
 - `src/lib/sender.js` — envio. **Hoje:** Gmail preview. **Depois:** E-goi (produção).
 
-Trocar Gmail→E-goi ou Sheets→Postgres mexe **só nesses dois arquivos**, sem tocar na lógica das etapas.
+Trocar Gmail→E-goi ou o backend do banco mexe **só nesses dois arquivos**, sem tocar na lógica das etapas.
 
 ## Rodar localmente
 

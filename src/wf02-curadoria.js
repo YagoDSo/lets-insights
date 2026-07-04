@@ -6,7 +6,7 @@
 //   Salvar Edição
 // ════════════════════════════════════════════════════════════
 import { config, requireEnv } from './lib/config.js';
-import { lerAba, upsertLinhas } from './lib/store.js';
+import { lerAba, upsertLinhas, commitarBanco } from './lib/db.js';
 import { chamarClaude } from './lib/claude.js';
 import { repairJSON } from './lib/repair.js';
 import { gerarImagemPorTema } from './lib/imagegen.js';
@@ -195,7 +195,7 @@ ${JSON.stringify(selecionados, null, 2)}`;
 
 // ─── Orquestração ────────────────────────────────────────────
 async function main() {
-  requireEnv(['SHEETS_DOC_ID', 'ANTHROPIC_API_KEY']);
+  requireEnv(['ANTHROPIC_API_KEY']);
 
   // "Ler Artigos Coletados" + "Definir Edição": max(edicao) = a que o WF-01 gravou.
   const { rows } = await lerAba(config.abaArtigos);
@@ -384,6 +384,7 @@ async function main() {
   };
   const res = await upsertLinhas(config.abaEdicoes, [linha], 'edicao');
   console.log(`✓ Salvo na aba ${config.abaEdicoes}: ${res.inseridos} inseridos, ${res.atualizados} atualizados.`);
+  commitarBanco(`chore: WF-02 curadoria e redação edição ${edicaoAtual}`);
 }
 
 main().catch((e) => {

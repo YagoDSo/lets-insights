@@ -9,10 +9,10 @@ export const config = {
   // Gemini API (geração de imagem fallback — ver lib/imagegen.js)
   geminiApiKey: process.env.GEMINI_API_KEY,
 
-  // Banco de dados (hoje Google Sheets — ver lib/store.js)
-  sheetsDocId: process.env.SHEETS_DOC_ID || '1xSjvbZwI-3oLScimPcpBftB2E4muLV07dt1ZOVo3N5s',
-  abaEdicoes: process.env.SHEETS_ABA_EDICOES || 'Edicoes',
-  abaArtigos: process.env.SHEETS_ABA_ARTIGOS || 'Artigos_Coletados',
+  // Banco de dados (SQLite commitado no repo — ver lib/db.js)
+  dbPath: process.env.SQLITE_DB_PATH || 'data/newsletter.db',
+  abaArtigos: 'artigos_coletados',
+  abaEdicoes: 'edicoes',
 
   // Envio (hoje Gmail preview — ver lib/sender.js)
   sender: process.env.SENDER || 'gmail',
