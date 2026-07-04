@@ -1,8 +1,13 @@
 import Parser from 'rss-parser';
 
+// User-Agent de browser real: alguns portais (ex.: mobilidade.estadao.com.br)
+// devolvem 403 pra User-Agent de bot identificado, mas 200 pra este.
 const parser = new Parser({
   timeout: 20000,
-  headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LetsInsightsBot/1.0)' },
+  headers: {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+  },
 });
 
 // Lê vários feeds em paralelo. Equivale aos 9 nós RSS com continueOnFail:

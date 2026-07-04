@@ -11,8 +11,14 @@ import { lerAba, upsertLinhas } from './lib/store.js';
 import { chamarClaudeComWebSearch } from './lib/claude.js';
 import { repairJSON } from './lib/repair.js';
 
-// 9 feeds RSS (mesma lista do PROD-WF-01).
+// Feeds RSS. Base original (PROD-WF-01) + expansão pro ICP de operação de
+// campo (jul/2026): cada URL abaixo foi validada manualmente (200 + XML de
+// RSS real com itens recentes) antes de entrar aqui — ver relato da sessão
+// que adicionou os feeds de mineração/geotecnia/ambiente/infra/siderurgia.
+// `valorinveste.globo.com/rss/` foi removido: descontinuado pela Globo (404
+// em toda variação de path testada, sem link de feed na homepage).
 const FEEDS = [
+  // Base original (frota/transporte/logística/economia)
   { url: 'https://frotacia.com.br/feed/' },
   { url: 'https://transportemoderno.com.br/feed/' },
   { url: 'https://diariodotransporte.com.br/feed/' },
@@ -20,8 +26,22 @@ const FEEDS = [
   { url: 'https://neofeed.com.br/feed/' },
   { url: 'https://braziljournal.com/feed/' },
   { url: 'https://mobilidade.estadao.com.br/feed/' },
-  { url: 'https://valorinveste.globo.com/rss/' },
   { url: 'https://exame.com/feed/' },
+  // Mineração
+  { url: 'https://brasilmineral.com.br/rss.xml' },
+  { url: 'https://ibram.org.br/feed/' },
+  // Meio ambiente
+  { url: 'https://oeco.org.br/feed/' },
+  // Florestal / celulose
+  { url: 'https://iba.org/feed/' },
+  // Concessão de rodovias / infraestrutura
+  { url: 'https://abcr.org.br/feed/' },
+  // Indústria ferroviária (infraestrutura/logística adjacente)
+  { url: 'https://abifer.org.br/feed/' },
+  // Logística / transporte rodoviário de carga B2B
+  { url: 'https://logisticanobrasil.com.br/feed' },
+  { url: 'https://ocarreteiro.com.br/feed/' },
+  { url: 'https://cargapesada.com.br/feed/' },
 ];
 
 // Normaliza texto: minúsculas + remove acentos. Usado nos filtros e no classificador.
@@ -97,6 +117,17 @@ Sua resposta final deve conter SOMENTE o array JSON — nenhuma frase de introdu
   }
 }
 
+// brasilmineral.com.br usa um formato de data não-padrão que o rss-parser não
+// reconhece ("Fri, 07/03/2026 - 15:16", ou seja MM/DD/AAAA - HH:MM, confirmado
+// batendo o dia da semana com a data). Sem isso, calcularIdade() descartaria
+// esses artigos (idade_dias cai no fallback 999 > corte de 60 dias).
+function corrigirDataBrasilMineral(str) {
+  const m = String(str || '').match(/(\d{2})\/(\d{2})\/(\d{4}) - (\d{2}):(\d{2})/);
+  if (!m) return str;
+  const [, mm, dd, aaaa, hh, min] = m;
+  return `${aaaa}-${mm}-${dd}T${hh}:${min}:00`;
+}
+
 // ─── Nó "Padronizar Estrutura" ───────────────────────────────
 function padronizar(itens) {
   const validos = itens.filter((it) => it && it.title && it.link);
@@ -113,12 +144,23 @@ function padronizar(itens) {
     else if (url.includes('valorinveste.globo.com') || url.includes('valor.globo.com'))
       fonte = 'Valor Econômico';
     else if (url.includes('exame.com')) fonte = 'Exame';
+    else if (url.includes('brasilmineral.com.br')) fonte = 'Brasil Mineral';
+    else if (url.includes('ibram.org.br')) fonte = 'IBRAM';
+    else if (url.includes('oeco.org.br')) fonte = '(o)eco';
+    else if (url.includes('iba.org')) fonte = 'IBÁ';
+    else if (url.includes('abcr.org.br') || url.includes('melhoresrodovias.org.br')) fonte = 'ABCR';
+    else if (url.includes('abifer.org.br')) fonte = 'ABIFER';
+    else if (url.includes('logisticanobrasil.com.br')) fonte = 'Logística no Brasil';
+    else if (url.includes('ocarreteiro.com.br')) fonte = 'O Carreteiro';
+    else if (url.includes('cargapesada.com.br')) fonte = 'Carga Pesada';
     else if (it.creator) fonte = it.creator;
+
+    const dataBruta = it.pubDate || it.isoDate || new Date().toISOString();
 
     return {
       titulo: (it.title || '').trim(),
       url,
-      data: it.pubDate || it.isoDate || new Date().toISOString(),
+      data: url.includes('brasilmineral.com.br') ? corrigirDataBrasilMineral(dataBruta) : dataBruta,
       resumo: (it.contentSnippet || it.content || it.description || '')
         .replace(/<[^>]*>/g, '')
         .replace(/\s+/g, ' ')

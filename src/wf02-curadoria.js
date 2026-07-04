@@ -58,22 +58,36 @@ function extrairImagem(html) {
 }
 
 // ─── Validar URLs Vivas (HEAD, timeout 5s) ───────────────────
-async function validarURL(url) {
+// Retenta uma vez em status tipicamente transitório (rate-limit/anti-bot do
+// site-fonte, ex: brasilmineral.com.br já observado alternando 403/200 pra
+// a mesma URL em requisições próximas) antes de descartar o artigo de vez.
+const STATUS_TRANSITORIO = new Set([403, 408, 425, 429, 500, 502, 503, 504]);
+
+async function validarURL(url, tentativas = 2) {
   if (!url || typeof url !== 'string') return { ok: false, status: 0 };
-  try {
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 5000);
-    const resp = await fetch(url, {
-      method: 'HEAD',
-      redirect: 'follow',
-      signal: controller.signal,
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LetsInsights-Bot/1.0; +https://www.lets.com.br)' },
-    });
-    clearTimeout(t);
-    return { ok: resp.ok, status: resp.status };
-  } catch {
-    return { ok: false, status: 0 }; // timeout/erro de rede: benefício da dúvida
+  let ultimoErro = { ok: false, status: 0 };
+  for (let tentativa = 1; tentativa <= tentativas; tentativa++) {
+    try {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 5000);
+      const resp = await fetch(url, {
+        method: 'HEAD',
+        redirect: 'follow',
+        signal: controller.signal,
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LetsInsights-Bot/1.0; +https://www.lets.com.br)' },
+      });
+      clearTimeout(t);
+      if (resp.ok || !STATUS_TRANSITORIO.has(resp.status) || tentativa === tentativas) {
+        return { ok: resp.ok, status: resp.status };
+      }
+      ultimoErro = { ok: false, status: resp.status };
+    } catch {
+      ultimoErro = { ok: false, status: 0 }; // timeout/erro de rede: benefício da dúvida
+      if (tentativa === tentativas) return ultimoErro;
+    }
+    await new Promise((r) => setTimeout(r, 3000));
   }
+  return ultimoErro;
 }
 // status 0 (rede) = mantém; >=400 = descarta.
 const deveDescartar = (r) => (r.status === 0 ? false : r.status >= 400);
@@ -88,7 +102,7 @@ Quem lê: Gestor de Frota, Coordenador de Campo, QSMS, Engenheiro de Campo (infl
 
 DORES QUE ATIVAM (priorize artigos que tocam nisso): manutenção corretiva imprevisível comendo margem; veículo barrado por laudo/RAC2 vencido; carga de gerir implementação e documentação da frota; atendimento sem solução real; veículo parado em campo como risco de segurança; pickup fora da norma da operação.
 
-Avalie cada artigo e selecione os 7 mais relevantes seguindo:
+Avalie cada artigo e selecione os 9 mais relevantes seguindo:
 1. RELEVÂNCIA PRA OPERAÇÃO DE CAMPO (40%): o artigo fala de TCO, RAC2/compliance e laudos, manutenção preventiva vs corretiva, gestão de frota em operação severa, ou de algum dos setores prioritários/secundários acima?
 2. ATUALIDADE (20%): Quanto mais recente, melhor
 3. AUTORIDADE DA FONTE (20%): Fontes especializadas valem mais
@@ -96,11 +110,11 @@ Avalie cada artigo e selecione os 7 mais relevantes seguindo:
 
 Descarte: conteúdo promocional, cases de concorrente direta, notícias internacionais sem relevância pro Brasil, conteúdo genérico de RH/carreira/mobilidade urbana sem relação com operação de campo, e qualquer artigo com foco central em preço (promoção, desconto, "mais barato").
 
-REGRA DE DIVERSIDADE DE FONTE: no máximo 2 matérias da mesma fonte entre as 7 escolhidas.
+REGRA DE DIVERSIDADE DE FONTE: no máximo 2 matérias da mesma fonte entre as 9 escolhidas. Esta regra é ESTRITA e vale pro conjunto inteiro (incluindo as reservas) — nunca escolha uma 3ª matéria da mesma fonte só porque ela também é relevante; prefira uma matéria de outra fonte, mesmo com score um pouco menor.
 
-REGRA DE DIVERSIDADE DE TEMA (CRÍTICA): cada artigo tem um campo "tema". Entre os 7 selecionados, NÃO concentre num único tema. Distribua entre temas diferentes (Eletrificacao, Regulacao, Tecnologia, Mercado, RenovacaoFrota, Custos, Logistica, OperacaoCampo, Outros). O ideal é que os 3 PRINCIPAIS (top 3 por score) sejam de 3 temas DISTINTOS entre si. Se houver muitos artigos do mesmo tema, escolha o melhor de cada tema antes de repetir tema. Variedade temática é mais importante que pequenas diferenças de score. Ao empatar em score, prefira o artigo de tema OperacaoCampo ou Regulacao (mais alinhado ao ICP de operação de campo/compliance) sobre temas genéricos de mercado.
+REGRA DE DIVERSIDADE DE TEMA (CRÍTICA): cada artigo tem um campo "tema". Entre os 9 selecionados, NÃO concentre num único tema. Distribua entre temas diferentes (Eletrificacao, Regulacao, Tecnologia, Mercado, RenovacaoFrota, Custos, Logistica, OperacaoCampo, Outros). O ideal é que os 3 PRINCIPAIS (top 3 por score) sejam de 3 temas DISTINTOS entre si. Se houver muitos artigos do mesmo tema, escolha o melhor de cada tema antes de repetir tema. Variedade temática é mais importante que pequenas diferenças de score. Ao empatar em score, prefira o artigo de tema OperacaoCampo ou Regulacao (mais alinhado ao ICP de operação de campo/compliance) sobre temas genéricos de mercado.
 
-IMPORTANTE: ordene os 7 selecionados pelo score (do maior pro menor), MAS respeitando a diversidade de tema nos 3 primeiros. Atribua scores diferenciados.
+IMPORTANTE: ordene os 9 selecionados pelo score (do maior pro menor), MAS respeitando a diversidade de tema nos 3 primeiros. Atribua scores diferenciados. As posições 6, 7 e 8 (as três últimas) são reserva (backup) — coloque aí os 3 melhores artigos que sobrarem (de fontes/temas ainda dentro do limite de diversidade), caso algum dos 6 primeiros (principais + cards) seja descartado depois por falha de link.
 
 Retorne APENAS JSON válido (sem markdown), ordenado por score decrescente:
 {"selecionados": [{"titulo_original": "...", "url": "...", "fonte": "...", "data": "...", "tema": "...", "score": 0-10, "justificativa": "...", "categoria": "Análise|Renovação de frota|Regulação|Tecnologia|Carbono|Sazonalidade|Mercado"}]}
@@ -125,28 +139,28 @@ TOM DE VOZ (guia oficial da marca, siga à risca):
 
 REGRAS DE COPYRIGHT (CRÍTICO): NUNCA copie trechos literais. SEMPRE parafraseie. Cite a fonte ao final.
 
-REGRA DE DIVERSIDADE EDITORIAL (CRÍTICA): das 7 matérias que recebeu, ao escolher os 3 principais e 3 cards (6 total), garanta que NO MÁXIMO 2 sejam da mesma fonte. Distribua entre as fontes disponíveis.
+REGRA DE DIVERSIDADE EDITORIAL (CRÍTICA): ao escolher os 3 principais e até 3 cards, garanta que NO MÁXIMO 2 sejam da mesma fonte. Distribua entre as fontes disponíveis.
 
-REGRA DE DIVERSIDADE DE TEMA (CRÍTICA): cada artigo tem um campo "tema". Os 3 PRINCIPAIS devem ser de 3 temas DISTINTOS entre si (nunca 2 principais do mesmo tema). Nos 3 CARDS, no MÁXIMO 1 card por tema (nunca 2 cards do mesmo tema). Se receber muitos artigos do mesmo tema, use o melhor como principal ou card e descarte os demais repetidos de tema, preferindo variedade. Variedade temática é mais importante que pequenas diferenças de score.
+REGRA DE DIVERSIDADE DE TEMA (CRÍTICA): cada artigo tem um campo "tema". Os 3 PRINCIPAIS devem ser de 3 temas DISTINTOS entre si (nunca 2 principais do mesmo tema). Nos CARDS, no MÁXIMO 1 card por tema (nunca 2 cards do mesmo tema). Se receber muitos artigos do mesmo tema, use o melhor como principal ou card e descarte os demais repetidos de tema, preferindo variedade. Variedade temática é mais importante que pequenas diferenças de score.
 
 REGRA CRÍTICA DE INTEGRIDADE DE DADOS: você DEVE preservar EXATAMENTE como recebidos os campos url, fonte e imagem de cada artigo. NUNCA invente, modifique, encurte ou abrevie URLs. NUNCA troque URLs entre artigos. Esta regra é INVIOLÁVEL.
 
-Você receberá 7 artigos ordenados por score (do maior pro menor). Trate eles em 2 grupos:
+Você vai receber uma lista de artigos JÁ validados (link e imagem conferidos), ordenados por score (do maior pro menor). IMPORTANTE: nem sempre a lista terá 9 artigos — alguns dos que a curadoria escolheu podem ter sido descartados nessa validação por link morto ou erro temporário do site de origem, então você pode receber menos itens do que o esperado. NUNCA invente um artigo pra completar uma quantidade "ideal": use só o que está na lista.
 
-GRUPO 1 - ARTIGOS PRINCIPAIS (posições 0, 1, 2): destaque editorial
+Trate a lista recebida assim, respeitando as regras de diversidade de fonte/tema acima na hora de escolher quem vai em cada grupo:
+
+GRUPO 1 - ARTIGOS PRINCIPAIS: escolha os 3 melhores artigos da lista pra esse grupo (destaque editorial).
 Para CADA artigo principal, gere:
 - categoria (1-2 palavras, ex: "Análise", "Pesados", "Leves", "Regulação", "Renovação de frota")
 - subtitulo (1 palavra/curto identificando o tema, ex: "Pesados", "Leves", "Regulação")
 - resumo (parafraseado, máx 50 palavras, traz contexto + dado/insight principal)
 - MANTENHA url, fonte e imagem EXATAMENTE como vieram
 
-GRUPO 2 - CARDS (posições 3, 4, 5): cards menores no grid
+GRUPO 2 - CARDS: dos artigos que sobraram (não usados como principal), use até 3 como cards menores no grid. Se sobrarem mais de 3, os excedentes são reserva e devem ser IGNORADOS (não aparecem na edição). Se sobrar menos de 3, gere só os cards que existirem — não invente um a mais.
 Para CADA card, gere:
 - categoria (1 palavra, ex: "Telemetria", "Carbono", "Sazonalidade")
 - resumo (parafraseado, máx 25 palavras, frase única e direta)
 - MANTENHA url, fonte e imagem EXATAMENTE como vieram
-
-GRUPO 3 - BACKUP (posição 6): descartar, é só reserva caso algum dos 6 acima tenha problema
 
 Gere também:
 
@@ -219,14 +233,29 @@ async function main() {
   if (!dadosCuradoria.selecionados || !Array.isArray(dadosCuradoria.selecionados)) {
     throw new Error('JSON da curadoria inválido');
   }
-  const selecionados = dadosCuradoria.selecionados.map((art, idx) => ({ ...art, posicao: idx }));
+  // A regra "máx 2 por fonte" é só pedida no prompt — a IA já violou isso na
+  // prática (3 artigos da mesma fonte), o que desperdiça vaga de backup rio
+  // abaixo (a redação descarta o excedente depois de já ter "gasto" o slot).
+  // Reforça em código, mantendo a ordem por score (mais alto primeiro).
+  const MAX_POR_FONTE_CURADORIA = 2;
+  const contagemFonte = {};
+  const semExcessoDeFonte = dadosCuradoria.selecionados.filter((art) => {
+    const fonte = art.fonte || 'Desconhecido';
+    contagemFonte[fonte] = (contagemFonte[fonte] || 0) + 1;
+    if (contagemFonte[fonte] > MAX_POR_FONTE_CURADORIA) {
+      console.log(`  ⚠️ Removido por excesso de fonte (>${MAX_POR_FONTE_CURADORIA}): ${art.titulo_original} (${fonte})`);
+      return false;
+    }
+    return true;
+  });
+  const selecionados = semExcessoDeFonte.map((art, idx) => ({ ...art, posicao: idx }));
   console.log(`Curadoria: ${selecionados.length} artigos selecionados`);
 
   // "Buscar HTML do Artigo" + "Extrair Imagem"
   const comImagem = [];
   for (let idx = 0; idx < selecionados.length; idx++) {
     const original = selecionados[idx];
-    const tipo = idx < 3 ? 'PRINCIPAL' : 'CARD';
+    const tipo = idx < 3 ? 'PRINCIPAL' : idx < 6 ? 'CARD' : 'BACKUP';
     const html = await buscarHTML(original.url);
     const imagem = extrairImagem(html);
     console.log(`[${idx}] ${tipo}: ${original.titulo_original} (${original.fonte}) ${imagem ? '✓ img' : '✗ sem img'}`);
@@ -275,9 +304,9 @@ async function main() {
     throw new Error('Todos os artigos foram descartados na validação. Verifique o WF-01.');
   }
 
-  // "Gerar Imagem Fallback (IA)": artigos sem imagem válida entre os 6 que
-  // serão usados (posição 6 é backup e é descartada na redação) recebem
-  // imagem gerada via Gemini, hospedada no próprio repo (raw.githubusercontent.com).
+  // "Gerar Imagem Fallback (IA)": artigos sem imagem válida entre os 6 "reais"
+  // (posições 0-5; 6 e 7 são backup e nunca entram na edição) recebem imagem
+  // gerada via Gemini, hospedada no próprio repo (raw.githubusercontent.com).
   const semImagem = validados.filter((a) => !a.imagem && a.posicao < 6);
   if (semImagem.length > 0) {
     console.log(`\nGerando ${semImagem.length} imagem(ns) via IA (Gemini) para artigos sem imagem...`);

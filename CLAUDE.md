@@ -61,11 +61,20 @@ A automação roda em **N8N Cloud** e é composta por **3 workflows** que rodam 
 
 ### WF-01 (06:00) — Coleta
 ```
-Toda Segunda 06:00 → Ler Edicoes → Config Edição → [9 RSS] → Padronizar Estrutura
+Toda Segunda 06:00 → Ler Edicoes → Config Edição → [17 RSS] + [Busca Web] → Padronizar Estrutura
 → Calcular Idade → Filtrar por Palavras-Chave1 → Deduplicar → Filtrar Concorrentes
 → Enriquecer e Limitar → Salvar no Google Sheets
 ```
-- **9 feeds RSS:** Frota&Cia, Transporte Moderno, Diário do Transporte, Logweb, NeoFeed, Brazil Journal, Mobilidade Estadão, Valor Investe, Exame. Todos com `continueOnFail` + `onError: continueRegularOutput`.
+- **17 feeds RSS** (expandido jul/2026 pro ICP de operação de campo; `valorinveste.globo.com` removido por estar descontinuado — 404 em toda variação de path testada):
+  - Base original: Frota&Cia, Transporte Moderno, Diário do Transporte, Logweb, NeoFeed, Brazil Journal, Mobilidade Estadão, Exame.
+  - Mineração: Brasil Mineral, IBRAM.
+  - Meio ambiente: (o)eco.
+  - Florestal/celulose: IBÁ.
+  - Concessão de rodovias/infraestrutura: ABCR (publica em `melhoresrodovias.org.br`, não `abcr.org.br` — mapeamento de fonte cobre os dois).
+  - Indústria ferroviária (infra/logística adjacente): ABIFER.
+  - Logística/transporte de carga B2B: Logística no Brasil, O Carreteiro, Carga Pesada.
+  - Todos com `continueOnFail` (feed individual falhar não derruba a coleta).
+- **Busca web híbrida (jul/2026):** além dos feeds fixos, `buscarArtigosWeb()` usa a tool nativa `web_search` da Claude API pra buscar mais amplamente por temas do ICP, sempre limitada a artigos com data de publicação confirmável nos últimos 7 dias. Entra no MESMO pipeline de filtros abaixo (não é caminho separado). Ver `src/lib/claude.js` (`chamarClaudeComWebSearch`) e `src/wf01-coleta.js` (`buscarArtigosWeb`). Custo: US$10/1.000 buscas + tokens normais do modelo.
 - **Config Edição:** `max(edicao)+1` da aba Artigos_Coletados (numeração sequencial 1, 2, 3...).
 - **Calcular Idade:** não descarta por corte fixo; calcula `idade_dias`, descarta só >60 dias. Declara `pairedItem`.
 - **Filtrar por Palavras-Chave1:** filtro de relevância B2B. **Ver "ponto de atenção" abaixo** — pode estar em v2 (rigoroso) ou v3 (permissivo).
@@ -82,7 +91,7 @@ Toda Segunda 06:04 → Ler Edicoes → Definir Edição → Ler Artigos Coletado
 → Claude API - Redação → Parse Edição Final + Validar URLs → Salvar Edição
 ```
 - **Definir Edição:** `max(edicao)` (a que o WF-01 acabou de gravar).
-- **Preparar Curadoria:** passa `tema` à IA; regra de diversidade (3 principais de temas distintos; máx 2 por fonte). Seleciona 7 (3 principais + 3 cards + 1 backup), ordenados por score.
+- **Preparar Curadoria:** passa `tema` à IA; regra de diversidade (3 principais de temas distintos; máx 2 por fonte — reforçado em código após o parse da curadoria, não só no prompt, ver ponto de atenção 9). Seleciona 9 (3 principais + 3 cards + 3 backup), ordenados por score.
 - **Parse Curadoria / Parse Edição Final:** ambos usam `repairJSON()` (limpa aspas tipográficas, travessões, controle; escapa aspas internas linha a linha) antes do `JSON.parse`.
 - **Extrair Imagem:** og:image → twitter:image → image_src; normaliza `//` e `http→https`; preserva `tema`; usa `idx` do `.map` (não `posicao`).
 - **Validar URLs Vivas:** HEAD com timeout 5s; descarta 4xx/5xx; imagem 404 vira null mantendo artigo; erro de rede = mantém.
@@ -108,9 +117,12 @@ Toda Segunda 06:06 → Ler Todas as Edições1 → Validar e Selecionar Edição
 1. **Filtro de relevância (WF-01):** existem duas versões. **v2** (rigoroso, exige contexto B2B adjacente a termos genéricos) deixava passar só ~3 artigos. **v3** (termos centrais aceitos diretamente, exclusão B2C só para transporte público de passageiros, normalização de acento consistente) resolveu — passou para ~9 artigos. **Confirme qual está no `jsCode` do nó antes de diagnosticar escassez de artigos.**
 2. **`matchingColumns` (WF-01 Salvar):** tem que ser **`url`** na aba Artigos_Coletados. Se estiver `edicao` (ou vazio), o Sheets sobrescreve linhas da mesma edição e só salva 1-3 artigos.
 3. **WF-03 "Atualizar Status1":** há inconsistência — `documentId` aponta para aba Edicoes mas `sheetName.value` é o gid de Artigos_Coletados, com `matchingColumns=['edicao']`. Gera linhas-fantasma. **Correção pendente:** apontar consistentemente para a aba Edicoes.
-4. ~~**Fallback de imagem (WF-02 Parse Edição Final):** versão anterior tinha `aplicarFallback()` para trocar imagem null pelo fallback; sumiu da versão atual.~~ **RESOLVIDO (jul/2026):** artigos sem imagem válida (posições 0-5, backup na posição 6 é ignorado) agora geram imagem via Gemini API (`gerarImagemPorTema` em `src/lib/imagegen.js`), commitada em `public/generated/` e servida via `raw.githubusercontent.com` (`src/lib/gitAssets.js`). Passo roda dentro do `wf02-curadoria.js`, entre "Validar URLs Vivas" e "Preparar Redação". Requer `GEMINI_API_KEY` e permissão `contents: write` no job do GitHub Actions (já configurado no `newsletter.yml`).
+4. ~~**Fallback de imagem (WF-02 Parse Edição Final):** versão anterior tinha `aplicarFallback()` para trocar imagem null pelo fallback; sumiu da versão atual.~~ **RESOLVIDO (jul/2026):** artigos sem imagem válida (posições 0-5; 6, 7 e 8 são backup e são ignorados) agora geram imagem via Gemini API (`gerarImagemPorTema` em `src/lib/imagegen.js`), commitada em `public/generated/` e servida via `raw.githubusercontent.com` (`src/lib/gitAssets.js`). Passo roda dentro do `wf02-curadoria.js`, entre "Validar URLs Vivas" e "Preparar Redação". Requer `GEMINI_API_KEY` e permissão `contents: write` no job do GitHub Actions (já configurado no `newsletter.yml`).
 5. **Paired item errors (N8N 2.27):** se aparecer "Paired item data... unavailable", a causa é nó Code sem `pairedItem: {item: i}` declarado, ou referência `$('Nó').item` a nó fora da cadeia direta. Solução: usar `.first()`, declarar `pairedItem`, referenciar só nós da cadeia.
 6. **Hotlink 403 (Frota&Cia, Logweb no Outlook):** limitação do servidor da fonte ao baixar imagem sem referrer. Aceito como conhecido.
+7. **User-Agent do RSS (jul/2026):** `mobilidade.estadao.com.br` retornava 403 pro User-Agent de bot antigo (`LetsInsightsBot/1.0`); trocado por UA de browser real em `src/lib/rss.js`. Sem isso o feed parece "quebrado" mas na verdade só está sendo bloqueado por identificação de bot.
+8. **Rate-limit/anti-bot em `brasilmineral.com.br` (jul/2026):** o feed RSS funciona normal, mas a validação de URL viva (`validarURL`/`buscarHTML` no WF-02) pode receber 403 intermitente ao acessar a página do artigo — parece ser rate-limit por IP do site-fonte, não um bloqueio de User-Agent (testes manuais confirmaram 200 tanto com UA de bot quanto de browser fora de rajadas de teste; em outro teste o mesmo 403 persistiu mesmo com retry de 3s, então o rate-limit pode durar mais que alguns segundos). `validarURL` agora tenta 2x com espera de 3s em status tipicamente transitório (403/408/425/429/5xx) antes de descartar — mitiga parte dos casos, mas não é garantia. Aceito como conhecido, mesma categoria do item 6; não deve ser problema em produção (1 requisição por artigo, 1x/semana) mas pode descartar 1-2 artigos ocasionalmente — por isso o pool de backup do WF-02 foi aumentado (ver item 9).
+9. **Newsletter gerada com card faltando (jul/2026, bug real, corrigido):** edição de teste saiu com 3 principais + só 2 cards (devia ter 3). Causa raiz dupla: (a) só havia 1 artigo de reserva (7 selecionados = 3+3+1) — insuficiente quando 2 artigos da mesma fonte falham juntos na validação (item 8 acima), já que a regra de diversidade permite até 2 artigos da mesma fonte numa edição; (b) a curadoria (IA) violou sua própria regra de "máx 2 por fonte" e selecionou 3 artigos da mesma fonte entre os 7, desperdiçando o único backup nisso — a redação corrigiu depois descartando o excedente, mas àquela altura já não sobrava artigo pra repor o card. **Correção:** (1) `promptCuradoria`/`promptRedacao` agora pedem 9 artigos (3 principais + 3 cards + 3 backup, antes eram 7 com 1 backup); (2) a regra "máx 2 por fonte" é reforçada em CÓDIGO logo após o parse da curadoria (não só no prompt) — remove deterministicamente qualquer 3º artigo da mesma fonte antes de seguir pro resto do pipeline; (3) `promptRedacao` não depende mais de posições fixas (0,1,2 / 3,4,5 / 6) pra montar principais/cards — agora usa "os N primeiros da lista recebida" de forma dinâmica, robusto a quando artigos são descartados na validação e a lista fica menor que o esperado.
 
 ## Learnings técnicos (não repetir os erros)
 
@@ -137,7 +149,7 @@ Toda Segunda 06:06 → Ler Todas as Edições1 → Validar e Selecionar Edição
 - [ ] Decisão de horário (terça/quarta 8h30–10h vs segunda 06:00) + teste A/B.
 - [ ] Fase 2 captação: landing lets.com.br/newsletter, double opt-in LGPD.
 - [ ] Base Pipedrive (~11k): enriquecimento Apollo + tracking pós-envio.
-- [ ] Expansão RSS: verificar `/feed/` de AIAFA News, Logística no Brasil, O Carreteiro, Carga Pesada, Estradão, Guia Marítimo, NTC&Logística.
+- [x] **Expansão RSS (jul/2026):** validado manualmente feed por feed (200 + XML real + itens recentes). Adicionados: Logística no Brasil, O Carreteiro, Carga Pesada (dessa lista), mais Brasil Mineral, IBRAM, (o)eco, IBÁ, ABCR, ABIFER (mineração/ambiente/florestal/infra, fora da lista original). **Rejeitados** (sem feed funcional): AIAFA News (`/feed/` 404, `?feed=rss2` devolve HTML normal), Estradão (domínio `estradao.com.br` não resolve/não existe), Guia Marítimo (`/feed/` redireciona pra página 404 do site), NTC&Logística (`portalntc.org.br/feed/` cai em challenge anti-bot, não retorna RSS real). Ver lista completa e domínios em `src/wf01-coleta.js` (`FEEDS`).
 
 ---
 
