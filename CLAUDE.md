@@ -8,7 +8,7 @@ Este arquivo orienta o Claude Code ao trabalhar neste repositório. Leia por com
 
 **Let's Insights** é uma newsletter B2B semanal **totalmente automatizada**, da **Let's** (gestão de frotas, Grupo Águia Branca / portfólio VIXPar, Vitória/ES). Público: gestores de frota, diretores de logística e CFOs de empresas que terceirizam veículos. Responsável: Yago Dias Soares (CRM e Marketing Automation).
 
-A automação roda em **N8N Cloud** e é composta por **3 workflows** que rodam toda segunda-feira em sequência por horário (não estão encadeados por conexão — são schedules independentes):
+A automação roda em **N8N Cloud** e é composta por **3 workflows** que rodam toda terça-feira em sequência por horário (não estão encadeados por conexão — são schedules independentes):
 
 - **WF-01** às 06:00 — coleta de notícias (RSS) → aba `Artigos_Coletados`
 - **WF-02** às 06:04 — curadoria + redação (Claude API) → aba `Edicoes`
@@ -62,7 +62,7 @@ A automação roda em **N8N Cloud** e é composta por **3 workflows** que rodam 
 
 ### WF-01 (06:00) — Coleta
 ```
-Toda Segunda 06:00 → Ler Edicoes → Config Edição → [17 RSS] + [Busca Web] → Padronizar Estrutura
+Toda Terça 06:00 → Ler Edicoes → Config Edição → [17 RSS] + [Busca Web] → Padronizar Estrutura
 → Calcular Idade → Filtrar por Palavras-Chave1 → Deduplicar → Filtrar Concorrentes
 → Enriquecer e Limitar → Salvar no Google Sheets
 ```
@@ -86,7 +86,7 @@ Toda Segunda 06:00 → Ler Edicoes → Config Edição → [17 RSS] + [Busca Web
 
 ### WF-02 (06:04) — Curadoria + Redação
 ```
-Toda Segunda 06:04 → Ler Edicoes → Definir Edição → Ler Artigos Coletados
+Toda Terça 06:04 → Ler Edicoes → Definir Edição → Ler Artigos Coletados
 → Filtrar Edição Atual → Preparar Curadoria → Claude API - Curadoria → Parse Curadoria
 → Buscar HTML do Artigo → Extrair Imagem → Validar URLs Vivas → Preparar Redação
 → Claude API - Redação → Parse Edição Final + Validar URLs → Salvar Edição
@@ -102,7 +102,7 @@ Toda Segunda 06:04 → Ler Edicoes → Definir Edição → Ler Artigos Coletado
 
 ### WF-03 (06:06) — Montagem HTML + Envio
 ```
-Toda Segunda 06:06 → Ler Todas as Edições1 → Validar e Selecionar Edição1
+Toda Terça 06:06 → Ler Todas as Edições1 → Validar e Selecionar Edição1
 → Buscar Blog Lets → Extrair Post Recente → Buscar Página do Post → Extrair Imagem do Post
 → Montar HTML1 → Criar Anexo HTML1 → Gmail - Enviar Preview1 → Confirmar Preview1
 → Atualizar Status1
@@ -164,7 +164,7 @@ Análise do gasto de tokens do pipeline Claude API, com o objetivo de reduzir cu
 - [ ] Decidir reinclusão do `aplicarFallback()` no WF-02.
 - [ ] Conferir distribuição de temas nos logs e calibrar listas do `classificarTema()`.
 - [ ] Validar footer Outlook em edição real via E-goi.
-- [ ] Decisão de horário (terça/quarta 8h30–10h vs segunda 06:00) + teste A/B.
+- [x] Decisão de horário: terça-feira 06:00 BRT (mudou de segunda em jul/2026).
 - [ ] Fase 2 captação: landing lets.com.br/newsletter, double opt-in LGPD.
 - [ ] Base Pipedrive (~11k): enriquecimento Apollo + tracking pós-envio.
 - [x] **Expansão RSS (jul/2026):** validado manualmente feed por feed (200 + XML real + itens recentes). Adicionados: Logística no Brasil, O Carreteiro, Carga Pesada (dessa lista), mais Brasil Mineral, IBRAM, (o)eco, IBÁ, ABCR, ABIFER (mineração/ambiente/florestal/infra, fora da lista original). **Rejeitados** (sem feed funcional): AIAFA News (`/feed/` 404, `?feed=rss2` devolve HTML normal), Estradão (domínio `estradao.com.br` não resolve/não existe), Guia Marítimo (`/feed/` redireciona pra página 404 do site), NTC&Logística (`portalntc.org.br/feed/` cai em challenge anti-bot, não retorna RSS real). Ver lista completa e domínios em `src/wf01-coleta.js` (`FEEDS`).

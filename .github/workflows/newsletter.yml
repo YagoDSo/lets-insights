@@ -1,10 +1,10 @@
 name: Let's Insights — newsletter semanal
 
-# Roda toda segunda. GitHub Actions usa UTC; 09:00 UTC = 06:00 BRT (UTC-3).
+# Roda toda terça. GitHub Actions usa UTC; 09:00 UTC = 06:00 BRT (UTC-3).
 # Também pode ser disparado manualmente pela aba Actions (workflow_dispatch).
 on:
   schedule:
-    - cron: "0 9 * * 1"
+    - cron: "0 9 * * 2"
   workflow_dispatch:
 
 # Etapas ENCADEADAS de verdade: cada job só começa se o anterior passar (needs).

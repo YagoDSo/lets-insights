@@ -28,7 +28,7 @@ npm run pipeline       # roda as 3 em sequência
 
 ## Agendamento
 
-`.github/workflows/newsletter.yml` — cron toda segunda 09:00 UTC (06:00 BRT) + disparo manual.
+`.github/workflows/newsletter.yml` — cron toda terça 09:00 UTC (06:00 BRT) + disparo manual.
 Credenciais ficam em **Settings → Secrets and variables → Actions**.
 
 ## Regras do projeto

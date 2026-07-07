@@ -62,4 +62,4 @@ No repo → **Settings → Secrets and variables → Actions → New repository 
 ## 6. Disparo manual / agendado
 
 - Aba **Actions** do repo → workflow "Let's Insights" → **Run workflow** (disparo manual).
-- Agendado: toda segunda 09:00 UTC (06:00 BRT), via cron no `.github/workflows/newsletter.yml`.
+- Agendado: toda terça 09:00 UTC (06:00 BRT), via cron no `.github/workflows/newsletter.yml`.
