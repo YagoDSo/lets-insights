@@ -200,6 +200,72 @@ ${JSON.stringify(
 )}`;
 }
 
+// A redação principal às vezes deixa vaga de card sem motivo (falha de
+// instruction-following do modelo) mesmo havendo candidato validado e sem
+// conflito de fonte/tema disponível. Em vez de publicar a edição capenga,
+// completa com uma chamada avulsa focada só nesse artigo.
+function promptCardAvulso(artigo, resumoOriginal) {
+  return `Você é o redator-chefe da newsletter 'Let's Insights', B2B da Let's (gestão de frotas do Grupo Águia Branca) voltada pra gestores de frota, coordenadores de campo, QSMS e engenheiros de campo em operação com veículos 4x4.
+
+TOM: técnico, direto, especialista falando com especialista. Sem superlativo vazio, sem jargão de marketing, sem foco em preço, NUNCA use travessão (—). SEMPRE parafraseie, nunca copie trecho literal.
+
+Gere um card pra este artigo:
+Título original: ${artigo.titulo_original}
+Fonte: ${artigo.fonte}
+Resumo original: ${resumoOriginal || '(sem resumo disponível, baseie-se só no título)'}
+
+Retorne APENAS JSON válido (sem markdown):
+{"categoria": "1 palavra, ex: Telemetria, Carbono, Sazonalidade", "resumo": "parafraseado, máx 25 palavras, frase única e direta"}`;
+}
+
+// Completa cards que sobraram vazios após a redação principal, usando os
+// candidatos validados (posições 0-5 primeiro; backups só como último
+// recurso) que não foram aproveitados nem como principal nem como card,
+// respeitando as mesmas regras de diversidade (máx 1 tema por card, máx 2
+// por fonte no total da edição).
+async function completarCards(cards, principais, validados, mapaResumos) {
+  const MAX_CARDS = 3;
+  if (cards.length >= MAX_CARDS) return cards;
+
+  const usados = new Set([...principais, ...cards].map((a) => a.url));
+  const mapaTemaPorUrl = {};
+  validados.forEach((v) => (mapaTemaPorUrl[v.url] = v.tema));
+  const temasCards = new Set(cards.map((c) => mapaTemaPorUrl[c.url]).filter(Boolean));
+  const contarFonte = () => {
+    const c = {};
+    [...principais, ...cards].forEach((a) => (c[a.fonte] = (c[a.fonte] || 0) + 1));
+    return c;
+  };
+
+  const candidatosReais = validados.filter((v) => v.posicao < 6 && !usados.has(v.url));
+  const candidatosBackup = validados.filter((v) => v.posicao >= 6 && !usados.has(v.url));
+  for (const cand of [...candidatosReais, ...candidatosBackup]) {
+    if (cards.length >= MAX_CARDS) break;
+    if (temasCards.has(cand.tema)) continue;
+    if ((contarFonte()[cand.fonte] || 0) >= 2) continue;
+
+    let dadosCard;
+    try {
+      const texto = await chamarClaude(promptCardAvulso(cand, mapaResumos[cand.url]), { maxTokens: 500 });
+      dadosCard = JSON.parse(repairJSON(texto));
+    } catch (e) {
+      console.log(`⚠️ Falha ao gerar card avulso pra "${cand.titulo_original}" (${e.message}), pulando.`);
+      continue;
+    }
+    console.log(`⚠️ Card completado em código (IA deixou vaga): ${cand.titulo_original} (${cand.fonte})`);
+    cards.push({
+      categoria: dadosCard.categoria || cand.tema || 'Notícia',
+      resumo: dadosCard.resumo || '',
+      url: cand.url,
+      fonte: cand.fonte,
+      imagem: cand.imagem,
+    });
+    usados.add(cand.url);
+    temasCards.add(cand.tema);
+  }
+  return cards;
+}
+
 // ─── Orquestração ────────────────────────────────────────────
 async function main() {
   requireEnv(['ANTHROPIC_API_KEY']);
@@ -373,7 +439,11 @@ async function main() {
     return artIA;
   };
   const principais = edicao.artigos_principais.map((a, idx) => validarArtigo(a, idx, 'PRINCIPAL'));
-  const cards = edicao.artigos_cards.map((a, idx) => validarArtigo(a, idx + 3, 'CARD'));
+  let cards = edicao.artigos_cards.map((a, idx) => validarArtigo(a, idx + 3, 'CARD'));
+
+  const mapaResumos = {};
+  artigos.forEach((a) => (mapaResumos[a.url] = a.resumo));
+  cards = await completarCards(cards, principais, validados, mapaResumos);
 
   console.log(`✓ Edição ${edicaoAtual} gerada: "${edicao.titulo_edicao}"`);
   console.log(`Principais: ${principais.length} | Cards: ${cards.length}`);
