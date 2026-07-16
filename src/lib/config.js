@@ -5,10 +5,6 @@ export const config = {
   // Claude API
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   claudeModel: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929',
-  // Modelo mais barato usado só na busca web (WF-01): tarefa de extração/
-  // filtragem estruturada, não redação — não precisa do Sonnet usado em
-  // curadoria/redação. Ver CLAUDE.md "Otimização de custo de tokens (jul/2026)".
-  claudeModelBusca: process.env.CLAUDE_MODEL_BUSCA || 'claude-haiku-4-5-20251001',
 
   // Gemini API (geração de imagem fallback — ver lib/imagegen.js)
   geminiApiKey: process.env.GEMINI_API_KEY,

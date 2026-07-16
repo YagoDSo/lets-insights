@@ -1,6 +1,6 @@
 // ════════════════════════════════════════════════════════════
 // WF-01 — Coleta (porte fiel do PROD-WF-01.json do N8N)
-// Fluxo: Ler Edicoes → Config Edição → [9 RSS] → Padronizar →
+// Fluxo: Ler Edicoes → Config Edição → [16 RSS] → Padronizar →
 //   Calcular Idade → Filtrar Palavras-Chave → Deduplicar →
 //   Filtrar Concorrentes → Enriquecer e Limitar → Salvar
 // ════════════════════════════════════════════════════════════
@@ -8,8 +8,6 @@ import { pathToFileURL } from 'url';
 import { config } from './lib/config.js';
 import { lerFeeds } from './lib/rss.js';
 import { lerAba, upsertLinhas, commitarBanco } from './lib/db.js';
-import { chamarClaudeComWebSearch } from './lib/claude.js';
-import { repairJSON } from './lib/repair.js';
 
 // Feeds RSS. Base original (PROD-WF-01) + expansão pro ICP de operação de
 // campo (jul/2026): cada URL abaixo foi validada manualmente (200 + XML de
@@ -17,6 +15,10 @@ import { repairJSON } from './lib/repair.js';
 // que adicionou os feeds de mineração/geotecnia/ambiente/infra/siderurgia.
 // `valorinveste.globo.com/rss/` foi removido: descontinuado pela Globo (404
 // em toda variação de path testada, sem link de feed na homepage).
+// `mobilidade.estadao.com.br/feed/` removido (jul/2026): feed responde 200 e
+// devolve XML válido, mas ficou estagnado (item mais recente com 201 dias no
+// teste que motivou a remoção) — nunca contribuiu artigo em nenhuma edição
+// coletada até aqui, porque tudo cai no corte de idade de 60 dias.
 const FEEDS = [
   // Base original (frota/transporte/logística/economia)
   { url: 'https://frotacia.com.br/feed/' },
@@ -25,7 +27,6 @@ const FEEDS = [
   { url: 'https://logweb.com.br/feed/' },
   { url: 'https://neofeed.com.br/feed/' },
   { url: 'https://braziljournal.com/feed/' },
-  { url: 'https://mobilidade.estadao.com.br/feed/' },
   { url: 'https://exame.com/feed/' },
   // Mineração
   { url: 'https://brasilmineral.com.br/rss.xml' },
@@ -47,75 +48,6 @@ const FEEDS = [
 // Normaliza texto: minúsculas + remove acentos. Usado nos filtros e no classificador.
 const normalizar = (s) =>
   (s || '').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
-
-// ─── Busca web (Claude API, tool nativa "web_search") ────────
-// Complementa os 9 feeds RSS fixos: busca mais amplamente pela internet por
-// notícias alinhadas ao ICP da Let's, sempre limitando a artigos publicados
-// nos últimos N dias. Roda em paralelo aos RSS; os resultados entram no MESMO
-// pipeline de filtros (relevância, dedup, concorrentes) — não é uma via separada.
-const TEMAS_BUSCA_ICP = [
-  'gestão de frota corporativa notícias Brasil',
-  'TCO custo total de propriedade frota de veículos Brasil',
-  'RAC2 laudo de vistoria veicular compliance frota',
-  'mineração frota de veículos pickup 4x4 Brasil',
-  'geotecnia frota veículos operação de campo',
-  'meio ambiente licenciamento ambiental frota veículos',
-  'obras infraestrutura concessão de rodovias frota veículos',
-];
-
-async function buscarArtigosWeb(diasJanela = 7) {
-  const hoje = new Date().toISOString().substring(0, 10);
-  const prompt = `Data de referência (hoje): ${hoje}. Você tem acesso a uma ferramenta de busca na web.
-
-Pesquise notícias em português, de fontes brasileiras (portais de notícias, imprensa especializada em logística/frotas/mineração/infraestrutura/meio ambiente), sobre estes temas:
-${TEMAS_BUSCA_ICP.map((q, i) => `${i + 1}. ${q}`).join('\n')}
-
-REGRA CRÍTICA DE DATA: só inclua um artigo se você conseguir identificar com confiança a data de publicação dele E essa data estiver dentro dos últimos ${diasJanela} dias corridos contados a partir de ${hoje}. Se não conseguir confirmar a data de publicação, DESCARTE o resultado — nunca estime ou invente uma data.
-
-Não inclua: releases institucionais sem valor de notícia, posts de rede social, fóruns, páginas sem data verificável, ou resultados de fontes que não sejam veículos de imprensa/portais especializados.
-
-Para cada artigo aprovado, retorne um objeto com estes campos exatos:
-- titulo: título do artigo, como publicado (não traduza)
-- url: URL completa e real do artigo (nunca invente uma URL)
-- data: data de publicação, formato YYYY-MM-DD
-- resumo: resumo de até 400 caracteres do conteúdo do artigo
-- fonte: nome do veículo/portal que publicou
-
-Sua resposta final deve conter SOMENTE o array JSON — nenhuma frase de introdução, explicação ou conclusão antes ou depois, mesmo que o array esteja vazio: []`;
-
-  try {
-    const { texto, buscasRealizadas } = await chamarClaudeComWebSearch(prompt, {
-      maxTokens: 8000,
-      maxBuscas: 15,
-    });
-    console.log(`Busca web: ${buscasRealizadas} buscas realizadas pela IA`);
-    // O modelo às vezes explica antes/depois do array mesmo sendo instruído a não
-    // fazer isso; extrai só o trecho entre o primeiro '[' e o último ']'.
-    const match = texto.match(/\[[\s\S]*\]/);
-    if (!match) throw new Error('Nenhum array JSON encontrado na resposta');
-    const artigos = JSON.parse(repairJSON(match[0]));
-    if (!Array.isArray(artigos)) throw new Error('Resposta não é um array JSON');
-
-    const validos = artigos
-      .filter((a) => a && a.titulo && a.url)
-      .map((a) => ({
-        titulo: String(a.titulo).trim(),
-        url: a.url,
-        data: a.data || hoje,
-        resumo: String(a.resumo || '')
-          .replace(/\s+/g, ' ')
-          .trim()
-          .substring(0, 500),
-        fonte: a.fonte || 'Busca web',
-        _origem: 'busca_web',
-      }));
-    console.log(`Busca web: ${validos.length} artigos retornados (antes dos filtros de relevância/dedup)`);
-    return validos;
-  } catch (e) {
-    console.log(`⚠️ Busca web falhou (${e.message}). Seguindo só com RSS.`);
-    return [];
-  }
-}
 
 // brasilmineral.com.br usa um formato de data não-padrão que o rss-parser não
 // reconhece ("Fri, 07/03/2026 - 15:16", ou seja MM/DD/AAAA - HH:MM, confirmado
@@ -140,7 +72,6 @@ function padronizar(itens) {
     else if (url.includes('logweb.com.br')) fonte = 'Logweb';
     else if (url.includes('neofeed.com.br')) fonte = 'NeoFeed';
     else if (url.includes('braziljournal.com')) fonte = 'Brazil Journal';
-    else if (url.includes('mobilidade.estadao.com.br')) fonte = 'Mobilidade Estadão';
     else if (url.includes('valorinveste.globo.com') || url.includes('valor.globo.com'))
       fonte = 'Valor Econômico';
     else if (url.includes('exame.com')) fonte = 'Exame';
@@ -167,7 +98,6 @@ function padronizar(itens) {
         .trim()
         .substring(0, 500),
       fonte,
-      _origem: 'rss',
     };
   });
 
@@ -479,26 +409,14 @@ async function main() {
     .map((r) => (r.url || r.titulo || '').toLowerCase().trim())
     .filter(Boolean);
 
-  // [9 RSS] + [Busca Web] → Padronizar → Calcular Idade → Relevância → Dedup → Concorrentes → Enriquecer
-  // Híbrido: RSS continua sendo a fonte principal; a busca web complementa
-  // buscando mais amplamente pela internet, sempre limitada aos últimos 7 dias.
-  // Ambas passam pelos MESMOS filtros de relevância/concorrentes abaixo, e o
-  // dedup por URL cobre o caso de um artigo aparecer nas duas fontes.
-  const [brutos, artigosWeb] = await Promise.all([lerFeeds(FEEDS), buscarArtigosWeb(7)]);
-  let artigos = [...padronizar(brutos), ...artigosWeb];
-  console.log(
-    `Fontes antes dos filtros: ${artigos.filter((a) => a._origem === 'rss').length} via RSS, ` +
-      `${artigos.filter((a) => a._origem === 'busca_web').length} via busca web`,
-  );
+  // [16 RSS] → Padronizar → Calcular Idade → Relevância → Dedup → Concorrentes → Enriquecer
+  const brutos = await lerFeeds(FEEDS);
+  let artigos = padronizar(brutos);
 
   artigos = calcularIdade(artigos);
   artigos = filtrarRelevancia(artigos);
   artigos = deduplicar(artigos, urlsHistoricas);
   artigos = filtrarConcorrentes(artigos);
-  console.log(
-    `Fontes após filtros: ${artigos.filter((a) => a._origem === 'rss').length} via RSS, ` +
-      `${artigos.filter((a) => a._origem === 'busca_web').length} via busca web`,
-  );
 
   const finais = enriquecerELimitar(artigos, edicaoAtual);
 
@@ -513,10 +431,7 @@ async function main() {
   commitarBanco(`chore: WF-01 coleta edição ${edicaoAtual} (${res.inseridos} novo(s), ${res.atualizados} atualizado(s))`);
 }
 
-export { buscarArtigosWeb };
-
-// Só roda o pipeline completo quando este arquivo é executado diretamente
-// (permite importar buscarArtigosWeb isoladamente em scripts de teste).
+// Só roda o pipeline completo quando este arquivo é executado diretamente.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((e) => {
     console.error('✗ WF-01 falhou:', e);
