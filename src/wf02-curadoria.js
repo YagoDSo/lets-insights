@@ -130,6 +130,8 @@ TOM DE VOZ (guia oficial da marca, siga à risca):
 - Técnico, direto e confiável: fale como especialista de operação conversando com outro especialista de operação, nunca como vendedor.
 - Profissional sem ser formal demais, sem jargão de marketing.
 - Sempre traga a camada "e o que isso significa pra sua operação?" (impacto prático em campo, não abstrato).
+- SEMPRE que o artigo trouxer um dado concreto (número, %, prazo, valor), esse dado deve aparecer no título (principal) ou resumo (card) — números são mais concretos e convincentes que descrições genéricas.
+- Estruture a frase com o insight/impacto primeiro, a contextualização depois. Não enterre o "e daí" no fim.
 - NUNCA prometa o que não pode entregar.
 - NUNCA use superlativo vazio ("melhor", "líder", "número 1") nem linguagem de venda genérica (ex: "5 vantagens de...", "temos a solução perfeita pra sua empresa!").
 - NUNCA fale de preço antes de falar de operação. Preço não é gancho de manchete nem de resumo.
@@ -152,14 +154,13 @@ Trate a lista recebida assim, respeitando as regras de diversidade de fonte/tema
 GRUPO 1 - ARTIGOS PRINCIPAIS: escolha os 3 melhores artigos da lista pra esse grupo (destaque editorial).
 Para CADA artigo principal, gere:
 - categoria (1-2 palavras, ex: "Análise", "Pesados", "Leves", "Regulação", "Renovação de frota")
-- subtitulo (1 palavra/curto identificando o tema, ex: "Pesados", "Leves", "Regulação")
-- resumo (parafraseado, máx 50 palavras, traz contexto + dado/insight principal)
+- titulo (título curto no estilo manchete, MÁX 100 caracteres; parafraseado, nunca copie o título original; abra com o insight/dado principal, não com contextualização; deixe claro o "por que importa pra operação de campo" mesmo nesse formato curto; se houver dado concreto (número, %, prazo, valor), inclua)
 - MANTENHA url, fonte e imagem EXATAMENTE como vieram
 
 GRUPO 2 - CARDS: dos artigos que sobraram (não usados como principal), use até 3 como cards menores no grid. Se sobrarem mais de 3, os excedentes são reserva e devem ser IGNORADOS (não aparecem na edição). Se sobrar menos de 3, gere só os cards que existirem — não invente um a mais.
 Para CADA card, gere:
 - categoria (1 palavra, ex: "Telemetria", "Carbono", "Sazonalidade")
-- resumo (parafraseado, máx 25 palavras, frase única e direta)
+- titulo (título curto no estilo manchete, MÁX 70 caracteres; parafraseado, nunca copie o título original; abra com o insight/dado, não com contextualização; mesmo compacto, traga o "por que importa pra operação" — não vire uma manchete puramente factual; se houver dado concreto, inclua)
 - MANTENHA url, fonte e imagem EXATAMENTE como vieram
 
 Gere também:
@@ -181,10 +182,10 @@ Retorne APENAS JSON válido (sem markdown):
   "titulo_edicao": "...",
   "pre_header": "...",
   "artigos_principais": [
-    {"categoria": "...", "subtitulo": "...", "resumo": "...", "url": "...", "fonte": "...", "imagem": "..."}
+    {"categoria": "...", "titulo": "...", "url": "...", "fonte": "...", "imagem": "..."}
   ],
   "artigos_cards": [
-    {"categoria": "...", "resumo": "...", "url": "...", "fonte": "...", "imagem": "..."}
+    {"categoria": "...", "titulo": "...", "url": "...", "fonte": "...", "imagem": "..."}
   ],
   "cta_final": {"titulo": "...", "texto": "...", "botao": "..."}
 }
@@ -215,7 +216,7 @@ Fonte: ${artigo.fonte}
 Resumo original: ${resumoOriginal || '(sem resumo disponível, baseie-se só no título)'}
 
 Retorne APENAS JSON válido (sem markdown):
-{"categoria": "1 palavra, ex: Telemetria, Carbono, Sazonalidade", "resumo": "parafraseado, máx 25 palavras, frase única e direta"}`;
+{"categoria": "1 palavra, ex: Telemetria, Carbono, Sazonalidade", "titulo": "título curto no estilo manchete, máx 70 caracteres, frase única; abra com o insight/dado, não com contextualização; traga o por que importa pra operação"}`;
 }
 
 // Completa cards que sobraram vazios após a redação principal, usando os
@@ -255,7 +256,7 @@ async function completarCards(cards, principais, validados, mapaResumos) {
     console.log(`⚠️ Card completado em código (IA deixou vaga): ${cand.titulo_original} (${cand.fonte})`);
     cards.push({
       categoria: dadosCard.categoria || cand.tema || 'Notícia',
-      resumo: dadosCard.resumo || '',
+      titulo: dadosCard.titulo || '',
       url: cand.url,
       fonte: cand.fonte,
       imagem: cand.imagem,

@@ -45,19 +45,16 @@ const renderPrincipal = (art, isLast, idx) => {
             <div style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:10.5px;font-weight:700;color:#f15a22;letter-spacing:0.16em;text-transform:uppercase;margin-bottom:8px;">
               ${esc(art.categoria || 'Notícia')}
             </div>
-            <div class="dm-text-primary" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:17px;letter-spacing:0.04em;text-transform:uppercase;color:#12100b;line-height:1.2;margin-bottom:10px;">
-              ${esc(art.subtitulo)}
+            <div class="dm-text-primary" style="margin:0 0 14px;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:15.5px;line-height:1.35;color:#12100b;">
+              ${esc(art.titulo)}
             </div>
-            <p class="dm-text-body" style="margin:0 0 14px;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:13px;line-height:1.55;color:#4a4a52;">
-              ${esc(art.resumo)}
-            </p>
             <!--[if mso]>
             <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${safeURL(art.url)}" style="height:44px;v-text-anchor:middle;width:150px;" arcsize="8%" stroke="f" fillcolor="#f15a22"><w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI,Arial,sans-serif;font-size:13px;font-weight:bold;letter-spacing:0.5px;">Ler matéria</center></v:roundrect>
             <![endif]-->
             <!--[if !mso]><!-- -->
             <a href="${safeURL(art.url)}?utm_source=newsletter&utm_medium=email&utm_campaign=insights&utm_content=principal_${idx + 1}" target="_blank" style="background-color:#f15a22;color:#ffffff;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:0.04em;text-decoration:none;padding:10px 20px;border-radius:3px;display:inline-block;mso-hide:all;">Ler matéria</a>
             <!--<![endif]-->
-            <div style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:11px;color:#888;margin-top:10px;">Fonte: ${esc(art.fonte)}</div>
+            <div style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:11px;color:#a09ca2;margin-top:10px;">Fonte: ${esc(art.fonte)}</div>
           </td>
         </tr>
       </table>
@@ -72,7 +69,7 @@ const renderCard = (art, idx) => `
       <tr><td><a href="${safeURL(art.url)}" target="_blank" style="text-decoration:none;"><img src="${safeURL(art.imagem)}" alt="${esc(art.categoria || 'Notícia')}" width="100%" height="120" style="display:block;width:100%;height:120px;object-fit:cover;border:0;" /></a></td></tr>
       <tr><td style="height:14px;font-size:0;line-height:0;">&nbsp;</td></tr>
       <tr><td class="dm-text-primary" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:14px;letter-spacing:0.08em;text-transform:uppercase;color:#12100b;padding-bottom:10px;">${esc(art.categoria || 'Notícia')}</td></tr>
-      <tr><td class="dm-text-body" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:12.5px;line-height:1.5;color:#4a4a52;padding-bottom:14px;">${esc(art.resumo)}</td></tr>
+      <tr><td class="dm-text-primary" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:13px;line-height:1.4;color:#12100b;padding-bottom:14px;">${esc(art.titulo)}</td></tr>
       <tr><td>
         <!--[if mso]>
         <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${safeURL(art.url)}" style="height:44px;v-text-anchor:middle;width:150px;" arcsize="8%" stroke="f" fillcolor="#f15a22"><w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI,Arial,sans-serif;font-size:13px;font-weight:bold;letter-spacing:0.5px;">Ler matéria</center></v:roundrect>
@@ -81,7 +78,7 @@ const renderCard = (art, idx) => `
         <a href="${safeURL(art.url)}?utm_source=newsletter&utm_medium=email&utm_campaign=insights&utm_content=card_${idx + 1}" target="_blank" style="background-color:#f15a22;color:#ffffff;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:0.04em;text-decoration:none;padding:10px 20px;border-radius:3px;display:inline-block;mso-hide:all;">Ler matéria</a>
         <!--<![endif]-->
       </td></tr>
-      <tr><td style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:11px;color:#888;padding-top:10px;">Fonte: ${esc(art.fonte)}</td></tr>
+      <tr><td style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:11px;color:#a09ca2;padding-top:10px;">Fonte: ${esc(art.fonte)}</td></tr>
     </table>
 `;
 
@@ -258,18 +255,18 @@ export function montarHTML(dados) {
           ${gridCards}
 
           <tr>
-            <td bgcolor="#eeeeef" class="dm-editorial-bg" style="background-color:#eeeeef;padding:36px 40px 40px;text-align:center;" align="center">
-              <div class="dm-text-primary" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:800;font-size:20px;line-height:1.25;color:#12100b;letter-spacing:-0.01em;margin-bottom:14px;max-width:460px;margin-left:auto;margin-right:auto;">
+            <td bgcolor="#e9eff8" class="dm-editorial-bg" style="background-color:#e9eff8;padding:36px 40px 40px;text-align:center;" align="center">
+              <div class="dm-text-primary" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:20px;line-height:1.25;color:#12100b;letter-spacing:-0.01em;margin-bottom:14px;max-width:460px;margin-left:auto;margin-right:auto;">
                 ${esc(cta.titulo)}
               </div>
-              <p class="dm-text-body" style="margin:0 auto 24px;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:13.5px;line-height:1.6;color:#4a4a52;max-width:460px;">
+              <p class="dm-text-body" style="margin:0 auto 24px;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:13.5px;line-height:1.6;color:#2f323b;max-width:460px;">
                 ${esc(cta.texto || '')}
               </p>
               <!--[if mso]>
               <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="https://www.lets.com.br/solicitar-proposta" style="height:52px;v-text-anchor:middle;width:320px;" arcsize="8%" stroke="f" fillcolor="#f15a22"><w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI, Arial, sans-serif;font-size:13px;font-weight:bold;letter-spacing:1px">FALAR COM ESPECIALISTA</center></v:roundrect>
               <![endif]-->
               <!--[if !mso]><!-- -->
-              <a href="https://www.lets.com.br/solicitar-proposta?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" target="_blank" style="background-color:#f15a22;color:#ffffff;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:13px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;text-decoration:none;padding:16px 32px;border-radius:3px;display:inline-block;mso-hide:all;">FALAR COM ESPECIALISTA</a>
+              <a href="https://www.lets.com.br/solicitar-proposta?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" target="_blank" style="background-color:#f15a22;color:#ffffff;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:13px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;text-decoration:none;padding:16px 32px;border-radius:3px;display:inline-block;mso-hide:all;">FALAR COM ESPECIALISTA</a>
               <!--<![endif]-->
             </td>
           </tr>
