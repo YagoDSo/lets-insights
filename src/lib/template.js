@@ -272,7 +272,7 @@ export function montarHTML(dados) {
           </tr>
 
 
-          <tr><td style="height:24px;font-size:0;line-height:0;background-color:#e9e9ec;">&nbsp;</td></tr>
+          <tr><td style="height:24px;font-size:0;line-height:0;background-color:#e9eff8;">&nbsp;</td></tr>
 
           <tr>
             <td bgcolor="#f15a22" style="background-color:#f15a22;padding:32px 32px 28px;color:#ffffff;">
