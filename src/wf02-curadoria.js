@@ -2,8 +2,16 @@
 // WF-02 — Curadoria + Redação (porte fiel do PROD-WF-02.json)
 // Fluxo: Definir Edição → Ler Artigos → Filtrar Edição →
 //   Curadoria (Claude) → Buscar HTML/Extrair Imagem →
-//   Validar URLs Vivas → Redação (Claude) → Parse + Validar URLs →
+//   Validar URLs Vivas → Buscar post do blog Lets →
+//   Redação (Claude, artigos + blog) → Parse + Validar URLs →
 //   Salvar Edição
+//
+// jul/2026: fim da divisão principais/cards. Agora a redação escreve só
+// 3 artigos selecionados (sem "cards" menores) + o resumo do destaque do
+// blog Lets — o scraping do blog, que antes rodava no WF-03 na hora de
+// montar o HTML (sem persistir, sem passar pela IA), foi movido pra cá
+// pra a IA poder escrever um título/resumo de verdade sobre o post, em
+// vez de só reaproveitar o título bruto extraído por regex.
 // ════════════════════════════════════════════════════════════
 import { config, requireEnv } from './lib/config.js';
 import { lerAba, upsertLinhas, commitarBanco } from './lib/db.js';
@@ -12,11 +20,17 @@ import { repairJSON } from './lib/repair.js';
 import { gerarImagemPorTema } from './lib/imagegen.js';
 import { commitarImagensGeradas } from './lib/gitAssets.js';
 
+const FALLBACK_BLOG_IMG =
+  'https://cdn.prod.website-files.com/67d2cd7e700eb793f98a2e81/6a04acd2772388e00bdf5a8d_Gemini_Generated_Image_nmyoe6nmyoe6nmyo.png';
+
 const DIACRITICOS = new RegExp('[̀-ͯ]', 'g');
 const removerAcentos = (s) => s.normalize('NFD').replace(DIACRITICOS, '');
 const slugify = (s) => removerAcentos(s || 'geral').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
-// ─── Buscar HTML do Artigo (GET, tolerante a falha, timeout 15s) ─
+// ─── Buscar HTML (GET, tolerante a falha, timeout 15s) — usado tanto pra
+// artigos coletados (via link normalizado, pode vir com encoding estranho
+// do RSS) quanto pro scraping do blog Lets (URLs sempre nossas, sem esse
+// problema; encodeURI/decodeURI aqui são no-op nesse caso). ─────────────
 async function buscarHTML(url) {
   try {
     const controller = new AbortController();
@@ -55,6 +69,107 @@ function extrairImagem(html) {
     if (imagem.startsWith('http://')) imagem = imagem.replace('http://', 'https://');
   }
   return imagem || null;
+}
+
+// ─── Blog Lets: post mais recente (scraping da listagem) ──────
+const escaparRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function extrairPostRecente(html) {
+  if (!html || html.length < 1000) {
+    console.log('⚠️ HTML do blog vazio ou muito curto.');
+    return null;
+  }
+  const regexLinks = /<a[^>]+href="(\/blog\/[a-z0-9\-]+)"[^>]*>/gi;
+  const links = [];
+  let m;
+  while ((m = regexLinks.exec(html)) !== null) {
+    const slug = m[1];
+    if (slug === '/blog' || slug.startsWith('/blog/categoria') || slug.startsWith('/blog/tag')) continue;
+    if (!links.includes(slug)) links.push(slug);
+  }
+  if (links.length === 0) return null;
+
+  const slug = links[0];
+  const url = `https://www.lets.com.br${slug}`;
+
+  let titulo = null;
+  const regexBloco = new RegExp(`<a[^>]+href="${escaparRegex(slug)}"[^>]*>([\\s\\S]{0,500}?)<\\/a>`, 'i');
+  const bloco = html.match(regexBloco);
+  if (bloco) {
+    let texto = bloco[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    texto = texto.replace(/^Novo\s+/i, '');
+    const primeiraFrase = texto.match(/^[^.!?]+[.!?]/);
+    if (primeiraFrase) texto = primeiraFrase[0].trim();
+    texto = texto.replace(/\s*\d{1,2}\/\d{1,2}\/\d{2,4}.*$/i, '').trim();
+    texto = texto.replace(/\s*\d{1,2}\s*min.*$/i, '').trim();
+    if (texto.length > 150) texto = texto.substring(0, 147) + '...';
+    if (texto.length > 15) titulo = texto;
+  }
+  if (!titulo) {
+    titulo = slug.replace('/blog/', '').replace(/-/g, ' ');
+    titulo = titulo.charAt(0).toUpperCase() + titulo.slice(1);
+  }
+
+  return { titulo, url };
+}
+
+// ─── Blog Lets: imagem do post (og/twitter → 1ª img CDN após h1) ─
+function extrairImagemPost(htmlPost) {
+  if (!htmlPost || htmlPost.length < 500) return null;
+  const og = htmlPost.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
+  const tw = htmlPost.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i);
+  if (og && og[1].includes('http')) return og[1];
+  if (tw && tw[1].includes('http')) return tw[1];
+
+  const idxH1 = htmlPost.search(/<h1[^>]*>/i);
+  if (idxH1 > 0) {
+    const aposH1 = htmlPost.substring(idxH1);
+    const imgMatch = aposH1.match(/<img[^>]+src=["']([^"']*cdn\.prod\.website-files\.com[^"']+)["']/i);
+    if (imgMatch) {
+      const src = imgMatch[1];
+      const estrutural = /logo|icon|favicon|menu|footer|header|avatar/i.test(src);
+      if (!estrutural) return src;
+    }
+  }
+  return null;
+}
+
+// ─── Blog Lets: descrição do post (og:description/meta description) —
+// fallback curto caso a extração de texto completo abaixo falhe. ──────
+function extrairDescricaoPost(htmlPost) {
+  if (!htmlPost) return null;
+  let m = htmlPost.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i);
+  if (!m) m = htmlPost.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i);
+  return m ? m[1].trim() : null;
+}
+
+// ─── Blog Lets: texto completo do artigo (corpo da página, sem nav/
+// footer/script/style), pra IA extrair números e detalhes específicos
+// em vez de só reescrever a meta description (curta, genérica, escrita
+// pra SEO). Corta em 6000 caracteres — sobra pra qualquer post do blog,
+// evita gastar tokens à toa se a página vier maior que o esperado. ────
+function extrairTextoArtigo(htmlPost) {
+  if (!htmlPost || htmlPost.length < 500) return null;
+  let corpo = htmlPost;
+  const bodyMatch = corpo.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+  if (bodyMatch) corpo = bodyMatch[1];
+  corpo = corpo
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
+    .replace(/<header[\s\S]*?<\/header>/gi, ' ')
+    .replace(/<footer[\s\S]*?<\/footer>/gi, ' ');
+  let texto = corpo
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (texto.length < 100) return null; // extração falhou (página estranha/vazia)
+  if (texto.length > 6000) texto = texto.slice(0, 6000) + '...';
+  return texto;
 }
 
 // ─── Validar URLs Vivas (HEAD, timeout 5s) ───────────────────
@@ -102,7 +217,7 @@ Quem lê: Gestor de Frota, Coordenador de Campo, QSMS, Engenheiro de Campo (infl
 
 DORES QUE ATIVAM (priorize artigos que tocam nisso): manutenção corretiva imprevisível comendo margem; veículo barrado por laudo/RAC2 vencido; carga de gerir implementação e documentação da frota; atendimento sem solução real; veículo parado em campo como risco de segurança; pickup fora da norma da operação.
 
-Avalie cada artigo e selecione os 9 mais relevantes seguindo:
+Avalie cada artigo e selecione os 6 mais relevantes seguindo:
 1. RELEVÂNCIA PRA OPERAÇÃO DE CAMPO (40%): o artigo fala de TCO, RAC2/compliance e laudos, manutenção preventiva vs corretiva, gestão de frota em operação severa, ou de algum dos setores prioritários/secundários acima?
 2. ATUALIDADE (20%): Quanto mais recente, melhor
 3. AUTORIDADE DA FONTE (20%): Fontes especializadas valem mais
@@ -110,11 +225,11 @@ Avalie cada artigo e selecione os 9 mais relevantes seguindo:
 
 Descarte: conteúdo promocional, cases de concorrente direta, notícias internacionais sem relevância pro Brasil, conteúdo genérico de RH/carreira/mobilidade urbana sem relação com operação de campo, e qualquer artigo com foco central em preço (promoção, desconto, "mais barato").
 
-REGRA DE DIVERSIDADE DE FONTE: no máximo 2 matérias da mesma fonte entre as 9 escolhidas. Esta regra é ESTRITA e vale pro conjunto inteiro (incluindo as reservas) — nunca escolha uma 3ª matéria da mesma fonte só porque ela também é relevante; prefira uma matéria de outra fonte, mesmo com score um pouco menor.
+REGRA DE DIVERSIDADE DE FONTE (CRÍTICA): NENHUMA fonte pode se repetir entre as 6 escolhidas — cada uma vem de uma fonte diferente. Esta regra é ESTRITA e vale pro conjunto inteiro (incluindo as reservas) — nunca escolha uma 2ª matéria da mesma fonte só porque ela também é relevante; prefira uma matéria de outra fonte, mesmo com score um pouco menor.
 
-REGRA DE DIVERSIDADE DE TEMA (CRÍTICA): cada artigo tem um campo "tema". Entre os 9 selecionados, NÃO concentre num único tema. Distribua entre temas diferentes (Eletrificacao, Regulacao, Tecnologia, Mercado, RenovacaoFrota, Custos, Logistica, OperacaoCampo, Outros). O ideal é que os 3 PRINCIPAIS (top 3 por score) sejam de 3 temas DISTINTOS entre si. Se houver muitos artigos do mesmo tema, escolha o melhor de cada tema antes de repetir tema. Variedade temática é mais importante que pequenas diferenças de score. Ao empatar em score, prefira o artigo de tema OperacaoCampo ou Regulacao (mais alinhado ao ICP de operação de campo/compliance) sobre temas genéricos de mercado.
+REGRA DE DIVERSIDADE DE TEMA (CRÍTICA): cada artigo tem um campo "tema". Entre os 6 selecionados, NÃO concentre num único tema. Distribua entre temas diferentes (Eletrificacao, Regulacao, Tecnologia, Mercado, RenovacaoFrota, Custos, Logistica, OperacaoCampo, Outros). O ideal é que os 3 primeiros (top 3 por score) sejam de 3 temas DISTINTOS entre si. Se houver muitos artigos do mesmo tema, escolha o melhor de cada tema antes de repetir tema. Variedade temática é mais importante que pequenas diferenças de score. Ao empatar em score, prefira o artigo de tema OperacaoCampo ou Regulacao (mais alinhado ao ICP de operação de campo/compliance) sobre temas genéricos de mercado.
 
-IMPORTANTE: ordene os 9 selecionados pelo score (do maior pro menor), MAS respeitando a diversidade de tema nos 3 primeiros. Atribua scores diferenciados. As posições 6, 7 e 8 (as três últimas) são reserva (backup) — coloque aí os 3 melhores artigos que sobrarem (de fontes/temas ainda dentro do limite de diversidade), caso algum dos 6 primeiros (principais + cards) seja descartado depois por falha de link.
+IMPORTANTE: ordene os 6 selecionados pelo score (do maior pro menor), MAS respeitando a diversidade de tema nos 3 primeiros. Atribua scores diferenciados. As posições 3, 4 e 5 (as três últimas) são reserva (backup) — coloque aí os 3 melhores artigos que sobrarem (de fontes/temas ainda dentro do limite de diversidade), caso algum dos 3 primeiros seja descartado depois por falha de link.
 
 Retorne APENAS JSON válido (sem markdown), ordenado por score decrescente:
 {"selecionados": [{"titulo_original": "...", "url": "...", "fonte": "...", "data": "...", "tema": "...", "score": 0-10, "justificativa": "...", "categoria": "Análise|Renovação de frota|Regulação|Tecnologia|Carbono|Sazonalidade|Mercado"}]}
@@ -123,45 +238,51 @@ ARTIGOS:
 ${JSON.stringify(artigos, null, 2)}`;
 }
 
-function promptRedacao(selecionados) {
+function promptRedacao(selecionados, blogRaw) {
   return `Você é o redator-chefe da newsletter 'Let's Insights', uma publicação semanal B2B da Let's (gestão de frotas do Grupo Águia Branca) voltada para gestores de frota, coordenadores de campo, QSMS, engenheiros de campo e diretores de operações de empresas com frotas 4x4 em operação de campo (Engenharia/Geotecnia, Mineração, Meio Ambiente, Concessão de Rodovias, Obras/Montagem Industrial, Florestal/Celulose, Infraestrutura, Siderurgia).
 
 TOM DE VOZ (guia oficial da marca, siga à risca):
 - Técnico, direto e confiável: fale como especialista de operação conversando com outro especialista de operação, nunca como vendedor.
 - Profissional sem ser formal demais, sem jargão de marketing.
 - Sempre traga a camada "e o que isso significa pra sua operação?" (impacto prático em campo, não abstrato).
-- SEMPRE que o artigo trouxer um dado concreto (número, %, prazo, valor), esse dado deve aparecer no título (principal) ou resumo (card) — números são mais concretos e convincentes que descrições genéricas.
+- SEMPRE que o artigo trouxer um dado concreto (número, %, prazo, valor), esse dado deve aparecer no título — números são mais concretos e convincentes que descrições genéricas.
 - Estruture a frase com o insight/impacto primeiro, a contextualização depois. Não enterre o "e daí" no fim.
 - NUNCA prometa o que não pode entregar.
 - NUNCA use superlativo vazio ("melhor", "líder", "número 1") nem linguagem de venda genérica (ex: "5 vantagens de...", "temos a solução perfeita pra sua empresa!").
-- NUNCA fale de preço antes de falar de operação. Preço não é gancho de manchete nem de resumo.
+- NUNCA fale de preço antes de falar de operação. Preço não é gancho de manchete.
 - NUNCA use travessão (—).
 - Exemplos de tom certo: "Como calcular o TCO real de uma frota 4x4 em operação de campo", "RAC2: o que é e por que seu veículo precisa estar em conformidade", "Um laudo vencido pode parar sua equipe inteira".
 - Exemplos de tom errado (evite): "5 vantagens de terceirizar veículos", "Temos a solução perfeita pra sua empresa!", qualquer superlativo ou foco em preço.
 
-REGRAS DE COPYRIGHT (CRÍTICO): NUNCA copie trechos literais. SEMPRE parafraseie. Cite a fonte ao final.
+REFERÊNCIA DE ESTRUTURA DE FRASE: Brazil Journal. O título não é uma manchete seca — é UMA FRASE ÚNICA que declara o fato principal e emenda, na mesma frase, uma cláusula com o dado concreto e a implicação pra operação. Encadeie com dois-pontos, ponto e vírgula, ou "e"/"que" (NUNCA travessão — proibido pra nossa marca, mesmo sendo a técnica de encadeamento favorita do Brazil Journal). Exemplo real deles (adaptado): "A Rumo concluiu os primeiros 162 km da Ferrovia Estadual de Mato Grosso, ligando Rondonópolis a Dom Aquino: um investimento de R$ 5 bi que reduz o custo de escoamento na região." Exemplo no nosso tom: "ANTT reduz de 24 para 12 meses a validade do laudo RAC2: veículo com laudo vencido fica proibido de operar em estrada federal." Nunca separe em manchete + resumo — é uma frase só, com a cláusula extra dentro dela.
 
-REGRA DE DIVERSIDADE EDITORIAL (CRÍTICA): ao escolher os 3 principais e até 3 cards, garanta que NO MÁXIMO 2 sejam da mesma fonte. Distribua entre as fontes disponíveis.
+REGRAS DE COPYRIGHT (CRÍTICO): NUNCA copie trechos literais dos artigos de terceiros. SEMPRE parafraseie. Cite a fonte ao final. (Não se aplica ao destaque do blog Lets abaixo — é conteúdo próprio da marca.)
 
-REGRA DE DIVERSIDADE DE TEMA (CRÍTICA): cada artigo tem um campo "tema". Os 3 PRINCIPAIS devem ser de 3 temas DISTINTOS entre si (nunca 2 principais do mesmo tema). Nos CARDS, no MÁXIMO 1 card por tema (nunca 2 cards do mesmo tema). Se receber muitos artigos do mesmo tema, use o melhor como principal ou card e descarte os demais repetidos de tema, preferindo variedade. Variedade temática é mais importante que pequenas diferenças de score.
+REGRA DE DIVERSIDADE EDITORIAL (CRÍTICA): ao escolher os 3 artigos, NENHUMA fonte pode se repetir — cada um vem de uma fonte diferente. (Não se aplica ao destaque do blog Lets, que não concorre com essa diversidade.)
+
+REGRA DE DIVERSIDADE DE TEMA (CRÍTICA): cada artigo tem um campo "tema". Os 3 escolhidos devem ser de 3 temas DISTINTOS entre si (nunca 2 do mesmo tema). Se receber muitos artigos do mesmo tema, use o melhor e descarte os demais repetidos de tema, preferindo variedade. Variedade temática é mais importante que pequenas diferenças de score.
 
 REGRA CRÍTICA DE INTEGRIDADE DE DADOS: você DEVE preservar EXATAMENTE como recebidos os campos url, fonte e imagem de cada artigo. NUNCA invente, modifique, encurte ou abrevie URLs. NUNCA troque URLs entre artigos. Esta regra é INVIOLÁVEL.
 
-Você vai receber uma lista de artigos JÁ validados (link e imagem conferidos), ordenados por score (do maior pro menor). IMPORTANTE: nem sempre a lista terá 9 artigos — alguns dos que a curadoria escolheu podem ter sido descartados nessa validação por link morto ou erro temporário do site de origem, então você pode receber menos itens do que o esperado. NUNCA invente um artigo pra completar uma quantidade "ideal": use só o que está na lista.
+Você vai receber uma lista de artigos JÁ validados (link e imagem conferidos), ordenados por score (do maior pro menor). IMPORTANTE: nem sempre a lista terá 6 artigos — alguns dos que a curadoria escolheu podem ter sido descartados nessa validação por link morto ou erro temporário do site de origem, então você pode receber menos itens do que o esperado. NUNCA invente um artigo pra completar uma quantidade "ideal": use só o que está na lista.
 
-Trate a lista recebida assim, respeitando as regras de diversidade de fonte/tema acima na hora de escolher quem vai em cada grupo:
-
-GRUPO 1 - ARTIGOS PRINCIPAIS: escolha os 3 melhores artigos da lista pra esse grupo (destaque editorial).
-Para CADA artigo principal, gere:
+ARTIGOS SELECIONADOS: escolha os 3 melhores artigos da lista (respeitando as regras de diversidade de fonte/tema acima). Se sobrar menos de 3 na lista, gere só os que existirem — não invente um a mais.
+Para CADA artigo, gere:
 - categoria (1-2 palavras, ex: "Análise", "Pesados", "Leves", "Regulação", "Renovação de frota")
-- titulo (título curto no estilo manchete, MÁX 100 caracteres; parafraseado, nunca copie o título original; abra com o insight/dado principal, não com contextualização; deixe claro o "por que importa pra operação de campo" mesmo nesse formato curto; se houver dado concreto (número, %, prazo, valor), inclua)
+- titulo (MÁX 140 caracteres, DE VERDADE curto — isso é o registro rápido do Brazil Journal, não o do blog abaixo: UMA cláusula só, sem emendar uma segunda cláusula elaborada. Frase única no estilo Brazil Journal — ver REFERÊNCIA DE ESTRUTURA DE FRASE acima: fato principal + no máximo UM dado concreto e a implicação pra operação de campo, tudo na mesma frase curta, sem travessão; parafraseado, nunca copie o título original)
 - MANTENHA url, fonte e imagem EXATAMENTE como vieram
 
-GRUPO 2 - CARDS: dos artigos que sobraram (não usados como principal), use até 3 como cards menores no grid. Se sobrarem mais de 3, os excedentes são reserva e devem ser IGNORADOS (não aparecem na edição). Se sobrar menos de 3, gere só os cards que existirem — não invente um a mais.
-Para CADA card, gere:
-- categoria (1 palavra, ex: "Telemetria", "Carbono", "Sazonalidade")
-- titulo (título curto no estilo manchete, MÁX 70 caracteres; parafraseado, nunca copie o título original; abra com o insight/dado, não com contextualização; mesmo compacto, traga o "por que importa pra operação" — não vire uma manchete puramente factual; se houver dado concreto, inclua)
-- MANTENHA url, fonte e imagem EXATAMENTE como vieram
+DESTAQUE DO BLOG LETS (ÚNICO item com esse tratamento — os 3 artigos acima ficam curtos e rápidos, isso aqui é a exceção): abaixo vêm o título e o texto completo do post mais recente do blog institucional da Let's — conteúdo próprio da marca, não precisa de regra de diversidade nem de copyright, e AQUI a regra é diferente da dos artigos externos: em vez de uma frase-fato compacta, quero uma chamada mais detalhada e persuasiva, que dê vontade de clicar. Gere:
+- categoria: sempre "Blog Lets"
+- titulo (MÁX 260 caracteres; leia o texto completo do post abaixo e garimpe o que tem de mais concreto e curioso — números específicos, estatística inesperada, detalhe que a maioria não imagina, contraste chamativo — e construa uma frase (ou duas, ligadas por dois-pontos/ponto e vírgula, nunca travessão) que venda o clique com esse gancho, não um resumo burocrático do assunto. Ainda no tom da marca — nada de superlativo vazio ("incrível", "imperdível") nem clickbait vazio; a curiosidade tem que vir de um fato real do texto, não de suspense artificial)
+
+REGRA DE VOZ (INVIOLÁVEL, vale pro destaque do blog): mesmo sendo conteúdo próprio, a frase fica em 3ª pessoa neutra, no mesmo registro de reportagem dos artigos externos — NUNCA "no blog, a Let's mostra/ensina/explica", NUNCA "você vai ver/aprender", NUNCA a marca falando de si mesma na frase. Relate o fato do jeito que uma editoria de negócios relataria uma notícia de terceiros: o fato primeiro, a implicação depois, sem se autopromover dentro do título. O link/imagem/botão já deixam claro que é conteúdo Let's — a frase não precisa (e não deve) dizer isso.
+
+REGRA CRÍTICA (INVIOLÁVEL, vale pro destaque do blog): todo número, estatística, dado ou detalhe que aparecer no título DEVE estar literalmente presente no "Texto completo do artigo" abaixo. NUNCA invente, estime, arredonde de forma enganosa nem "complete" um dado que o texto não fornece. Se o texto completo não tiver nenhum número ou detalhe curioso de sobra, construa a frase persuasiva só com o que estiver escrito ali (pode usar o ângulo/insight do artigo, só não pode inventar dado concreto que não exista no texto-fonte). Na dúvida, prefira uma chamada mais genérica e verdadeira a uma específica e inventada.
+
+Post do blog:
+Título: ${blogRaw?.titulo || '(sem título disponível)'}
+Texto completo do artigo: ${blogRaw?.textoCompleto || blogRaw?.descricao || '(sem texto disponível, baseie-se só no título)'}
 
 Gere também:
 
@@ -173,20 +294,20 @@ Gere também:
 2. PRÉ-HEADER (máx 90 caracteres, vira preview no inbox)
 
 3. CTA_FINAL (chamada pra falar com especialista Let's)
-   - titulo (pergunta provocativa ligada a um problema de operação de campo, ex: manutenção corretiva, laudo/RAC2 vencido, veículo parado em campo; NUNCA sobre preço, máx 60 chars)
+   - ANTES de escrever, releia os 3 artigos e o destaque do blog que você selecionou acima. Identifique qual dor operacional de campo domina ESTA edição especificamente (pode ser documentação/compliance, manutenção, disponibilidade de veículo, tecnologia, regulação ambiental, custo, ou outra — depende do que você mesmo selecionou, não de um exemplo fixo).
+   - titulo (pergunta provocativa ancorada NESSA dor específica da edição; NUNCA sobre preço, máx 60 chars)
    - texto (2 frases sobre a operação: veículo pronto pra operar, consultor dedicado, documentação/laudos resolvidos; sem falar de preço)
    - botao (texto do botão, ex: "FALAR COM ESPECIALISTA")
+   - VARIAÇÃO OBRIGATÓRIA: não repita sempre o mesmo gancho de "laudo/RAC2 vencido" só porque é um exemplo comum de outras edições — o gancho deve mudar conforme o tema real dos artigos selecionados nesta chamada.
 
 Retorne APENAS JSON válido (sem markdown):
 {
   "titulo_edicao": "...",
   "pre_header": "...",
-  "artigos_principais": [
+  "artigos_selecionados": [
     {"categoria": "...", "titulo": "...", "url": "...", "fonte": "...", "imagem": "..."}
   ],
-  "artigos_cards": [
-    {"categoria": "...", "titulo": "...", "url": "...", "fonte": "...", "imagem": "..."}
-  ],
+  "blog": {"categoria": "Blog Lets", "titulo": "..."},
   "cta_final": {"titulo": "...", "texto": "...", "botao": "..."}
 }
 
@@ -201,70 +322,71 @@ ${JSON.stringify(
 )}`;
 }
 
-// A redação principal às vezes deixa vaga de card sem motivo (falha de
+// A redação principal às vezes deixa vaga sem motivo (falha de
 // instruction-following do modelo) mesmo havendo candidato validado e sem
 // conflito de fonte/tema disponível. Em vez de publicar a edição capenga,
 // completa com uma chamada avulsa focada só nesse artigo.
-function promptCardAvulso(artigo, resumoOriginal) {
+function promptArtigoAvulso(artigo, resumoOriginal) {
   return `Você é o redator-chefe da newsletter 'Let's Insights', B2B da Let's (gestão de frotas do Grupo Águia Branca) voltada pra gestores de frota, coordenadores de campo, QSMS e engenheiros de campo em operação com veículos 4x4.
 
 TOM: técnico, direto, especialista falando com especialista. Sem superlativo vazio, sem jargão de marketing, sem foco em preço, NUNCA use travessão (—). SEMPRE parafraseie, nunca copie trecho literal.
 
-Gere um card pra este artigo:
+Gere o título pra este artigo:
 Título original: ${artigo.titulo_original}
 Fonte: ${artigo.fonte}
 Resumo original: ${resumoOriginal || '(sem resumo disponível, baseie-se só no título)'}
 
 Retorne APENAS JSON válido (sem markdown):
-{"categoria": "1 palavra, ex: Telemetria, Carbono, Sazonalidade", "titulo": "título curto no estilo manchete, máx 70 caracteres, frase única; abra com o insight/dado, não com contextualização; traga o por que importa pra operação"}`;
+{"categoria": "1-2 palavras, ex: Regulação, Tecnologia, Carbono", "titulo": "máx 140 caracteres, curto e rápido; UMA frase única com no máximo uma cláusula extra (dado concreto + implicação), nunca duas; nunca travessão"}`;
 }
 
-// Completa cards que sobraram vazios após a redação principal, usando os
-// candidatos validados (posições 0-5 primeiro; backups só como último
-// recurso) que não foram aproveitados nem como principal nem como card,
-// respeitando as mesmas regras de diversidade (máx 1 tema por card, máx 2
-// por fonte no total da edição).
-async function completarCards(cards, principais, validados, mapaResumos) {
-  const MAX_CARDS = 3;
-  if (cards.length >= MAX_CARDS) return cards;
+// Completa a lista de selecionados se sobrar vaga após a redação principal,
+// usando os candidatos validados (posições 0-2 primeiro; backups 3-5 só
+// como último recurso) que ainda não foram usados, respeitando as mesmas
+// regras de diversidade (sem tema repetido, sem fonte repetida no total).
+async function completarSelecionados(selecionados, validados, mapaResumos) {
+  const MAX = 3;
+  if (selecionados.length >= MAX) return selecionados;
 
-  const usados = new Set([...principais, ...cards].map((a) => a.url));
+  const usados = new Set(selecionados.map((a) => a.url));
   const mapaTemaPorUrl = {};
   validados.forEach((v) => (mapaTemaPorUrl[v.url] = v.tema));
-  const temasCards = new Set(cards.map((c) => mapaTemaPorUrl[c.url]).filter(Boolean));
+  const temasUsados = new Set(
+    selecionados.map((a) => mapaTemaPorUrl[a.url]).filter(Boolean),
+  );
   const contarFonte = () => {
     const c = {};
-    [...principais, ...cards].forEach((a) => (c[a.fonte] = (c[a.fonte] || 0) + 1));
+    selecionados.forEach((a) => (c[a.fonte] = (c[a.fonte] || 0) + 1));
     return c;
   };
 
-  const candidatosReais = validados.filter((v) => v.posicao < 6 && !usados.has(v.url));
-  const candidatosBackup = validados.filter((v) => v.posicao >= 6 && !usados.has(v.url));
+  const candidatosReais = validados.filter((v) => v.posicao < 3 && !usados.has(v.url));
+  const candidatosBackup = validados.filter((v) => v.posicao >= 3 && !usados.has(v.url));
   for (const cand of [...candidatosReais, ...candidatosBackup]) {
-    if (cards.length >= MAX_CARDS) break;
-    if (temasCards.has(cand.tema)) continue;
-    if ((contarFonte()[cand.fonte] || 0) >= 2) continue;
+    if (selecionados.length >= MAX) break;
+    if (temasUsados.has(cand.tema)) continue;
+    if ((contarFonte()[cand.fonte] || 0) >= 1) continue;
 
-    let dadosCard;
+    let dados;
     try {
-      const texto = await chamarClaude(promptCardAvulso(cand, mapaResumos[cand.url]), { maxTokens: 500 });
-      dadosCard = JSON.parse(repairJSON(texto));
+      const texto = await chamarClaude(promptArtigoAvulso(cand, mapaResumos[cand.url]), { maxTokens: 500 });
+      dados = JSON.parse(repairJSON(texto));
     } catch (e) {
-      console.log(`⚠️ Falha ao gerar card avulso pra "${cand.titulo_original}" (${e.message}), pulando.`);
+      console.log(`⚠️ Falha ao gerar artigo avulso pra "${cand.titulo_original}" (${e.message}), pulando.`);
       continue;
     }
-    console.log(`⚠️ Card completado em código (IA deixou vaga): ${cand.titulo_original} (${cand.fonte})`);
-    cards.push({
-      categoria: dadosCard.categoria || cand.tema || 'Notícia',
-      titulo: dadosCard.titulo || '',
+    console.log(`⚠️ Artigo completado em código (IA deixou vaga): ${cand.titulo_original} (${cand.fonte})`);
+    selecionados.push({
+      categoria: dados.categoria || cand.tema || 'Notícia',
+      titulo: dados.titulo || '',
       url: cand.url,
       fonte: cand.fonte,
       imagem: cand.imagem,
     });
     usados.add(cand.url);
-    temasCards.add(cand.tema);
+    temasUsados.add(cand.tema);
   }
-  return cards;
+  return selecionados;
 }
 
 // ─── Orquestração ────────────────────────────────────────────
@@ -282,8 +404,8 @@ async function main() {
   if (dessaEdicao.length === 0) {
     throw new Error(`Nenhum artigo para edição ${edicaoAtual}. WF-01 não rodou ou não encontrou conteúdo.`);
   }
-  if (dessaEdicao.length < 7) {
-    console.log(`⚠️ Apenas ${dessaEdicao.length} artigos disponíveis (esperado 7). Newsletter pode ficar incompleta.`);
+  if (dessaEdicao.length < 4) {
+    console.log(`⚠️ Apenas ${dessaEdicao.length} artigos disponíveis (esperado 4+). Newsletter pode ficar incompleta.`);
   }
   console.log(`Artigos da edição ${edicaoAtual}: ${dessaEdicao.length}`);
 
@@ -297,7 +419,7 @@ async function main() {
     resumo: r.resumo,
     tema: r.tema || 'Outros',
   }));
-  const textoCuradoria = await chamarClaude(promptCuradoria(artigos), { maxTokens: 4000 });
+  const textoCuradoria = await chamarClaude(promptCuradoria(artigos), { maxTokens: 3000 });
   let dadosCuradoria;
   try {
     dadosCuradoria = JSON.parse(repairJSON(textoCuradoria));
@@ -307,11 +429,10 @@ async function main() {
   if (!dadosCuradoria.selecionados || !Array.isArray(dadosCuradoria.selecionados)) {
     throw new Error('JSON da curadoria inválido');
   }
-  // A regra "máx 2 por fonte" é só pedida no prompt — a IA já violou isso na
-  // prática (3 artigos da mesma fonte), o que desperdiça vaga de backup rio
-  // abaixo (a redação descarta o excedente depois de já ter "gasto" o slot).
-  // Reforça em código, mantendo a ordem por score (mais alto primeiro).
-  const MAX_POR_FONTE_CURADORIA = 2;
+  // A regra "sem fonte repetida" é só pedida no prompt — a IA já violou isso
+  // na prática, o que desperdiça vaga de backup rio abaixo. Reforça em
+  // código, mantendo a ordem por score (mais alto primeiro).
+  const MAX_POR_FONTE_CURADORIA = 1;
   const contagemFonte = {};
   const semExcessoDeFonte = dadosCuradoria.selecionados.filter((art) => {
     const fonte = art.fonte || 'Desconhecido';
@@ -322,14 +443,14 @@ async function main() {
     }
     return true;
   });
-  const selecionados = semExcessoDeFonte.map((art, idx) => ({ ...art, posicao: idx }));
-  console.log(`Curadoria: ${selecionados.length} artigos selecionados`);
+  const selecionadosCuradoria = semExcessoDeFonte.map((art, idx) => ({ ...art, posicao: idx }));
+  console.log(`Curadoria: ${selecionadosCuradoria.length} artigos selecionados`);
 
   // "Buscar HTML do Artigo" + "Extrair Imagem"
   const comImagem = [];
-  for (let idx = 0; idx < selecionados.length; idx++) {
-    const original = selecionados[idx];
-    const tipo = idx < 3 ? 'PRINCIPAL' : idx < 6 ? 'CARD' : 'BACKUP';
+  for (let idx = 0; idx < selecionadosCuradoria.length; idx++) {
+    const original = selecionadosCuradoria[idx];
+    const tipo = idx < 3 ? 'REAL' : 'BACKUP';
     const html = await buscarHTML(original.url);
     const imagem = extrairImagem(html);
     console.log(`[${idx}] ${tipo}: ${original.titulo_original} (${original.fonte}) ${imagem ? '✓ img' : '✗ sem img'}`);
@@ -371,17 +492,36 @@ async function main() {
     validados.push({ ...artigo, imagem });
   }
   console.log(`Válidos: ${validados.length}/${comImagem.length} | descartados: ${descartados} | imagens removidas: ${imagensDescartadas}`);
-  if (validados.length < 6) {
-    console.log(`⚠️ ALERTA: só ${validados.length} artigos válidos (precisa de 6: 3 principais + 3 cards).`);
+  if (validados.length < 3) {
+    console.log(`⚠️ ALERTA: só ${validados.length} artigos válidos (precisa de 3).`);
   }
   if (validados.length === 0) {
     throw new Error('Todos os artigos foram descartados na validação. Verifique o WF-01.');
   }
 
-  // "Gerar Imagem Fallback (IA)": artigos sem imagem válida entre os 6 "reais"
-  // (posições 0-5; 6 e 7 são backup e nunca entram na edição) recebem imagem
-  // gerada via Gemini, hospedada no próprio repo (raw.githubusercontent.com).
-  const semImagem = validados.filter((a) => !a.imagem && a.posicao < 6);
+  // Blog Lets: post mais recente + descrição (pra IA escrever o título) + imagem.
+  // Movido do WF-03 pra cá — antes o scraping rodava na hora de montar o
+  // HTML, sem passar pela IA nem persistir; agora entra na mesma chamada
+  // de redação, então precisa acontecer antes dela.
+  console.log('\nBuscando post mais recente do blog Lets...');
+  const blogHtml = await buscarHTML('https://www.lets.com.br/blog');
+  const postBlog = extrairPostRecente(blogHtml);
+  let blogRaw = null;
+  if (postBlog) {
+    const postHtml = await buscarHTML(postBlog.url);
+    const imgPost = extrairImagemPost(postHtml);
+    postBlog.imagem = imgPost || FALLBACK_BLOG_IMG;
+    postBlog.textoCompleto = extrairTextoArtigo(postHtml);
+    postBlog.descricao = extrairDescricaoPost(postHtml); // fallback se o texto completo falhar
+    blogRaw = postBlog;
+    console.log(`✓ Post do blog: "${postBlog.titulo}" (${postBlog.url}) ${imgPost ? '✓ img' : '✗ sem img (fallback)'} ${postBlog.textoCompleto ? `✓ texto (${postBlog.textoCompleto.length} chars)` : '✗ sem texto completo'}`);
+  } else {
+    console.log('⚠️ Não foi possível extrair post do blog. Usando fallback genérico.');
+  }
+
+  // "Gerar Imagem Fallback (IA)": artigos sem imagem válida entre os 3
+  // "reais" (posições 0-2; 3 e 4 são backup e nunca entram na edição).
+  const semImagem = validados.filter((a) => !a.imagem && a.posicao < 3);
   if (semImagem.length > 0) {
     console.log(`\nGerando ${semImagem.length} imagem(ns) via IA (Gemini) para artigos sem imagem...`);
     const arquivos = [];
@@ -406,7 +546,7 @@ async function main() {
   }
 
   // "Preparar Redação" + "Claude API - Redação"
-  const textoRedacao = await chamarClaude(promptRedacao(validados), { maxTokens: 4000 });
+  const textoRedacao = await chamarClaude(promptRedacao(validados, blogRaw), { maxTokens: 3000 });
   let edicao;
   try {
     edicao = JSON.parse(repairJSON(textoRedacao));
@@ -415,18 +555,17 @@ async function main() {
   }
 
   // "Parse Edição Final + Validar URLs"
-  const obrigatorios = ['titulo_edicao', 'pre_header', 'artigos_principais', 'artigos_cards', 'cta_final'];
+  const obrigatorios = ['titulo_edicao', 'pre_header', 'artigos_selecionados', 'blog', 'cta_final'];
   const faltando = obrigatorios.filter((c) => !edicao[c]);
   if (faltando.length > 0) throw new Error(`Campos faltando: ${faltando.join(', ')}`);
-  if (!Array.isArray(edicao.artigos_principais) || edicao.artigos_principais.length === 0) {
-    throw new Error('artigos_principais inválido ou vazio');
+  if (!Array.isArray(edicao.artigos_selecionados) || edicao.artigos_selecionados.length === 0) {
+    throw new Error('artigos_selecionados inválido ou vazio');
   }
-  if (!Array.isArray(edicao.artigos_cards)) throw new Error('artigos_cards inválido');
 
   // Integridade de URL: corrige URL/fonte/imagem caso a IA tenha inventado.
   const mapaOriginal = {};
   validados.forEach((s) => (mapaOriginal[s.url] = { url: s.url, fonte: s.fonte, imagem: s.imagem }));
-  const validarArtigo = (artIA, posEsperada, tipo) => {
+  const validarArtigo = (artIA, posEsperada) => {
     const urlIA = artIA.url || '';
     if (mapaOriginal[urlIA]) {
       const o = mapaOriginal[urlIA];
@@ -434,28 +573,39 @@ async function main() {
     }
     if (validados[posEsperada]) {
       const o = validados[posEsperada];
-      console.log(`⚠️ URL corrigida (${tipo} pos ${posEsperada}): IA inventou, usando original`);
+      console.log(`⚠️ URL corrigida (pos ${posEsperada}): IA inventou, usando original`);
       return { ...artIA, url: o.url, fonte: o.fonte, imagem: o.imagem };
     }
     return artIA;
   };
-  const principais = edicao.artigos_principais.map((a, idx) => validarArtigo(a, idx, 'PRINCIPAL'));
-  let cards = edicao.artigos_cards.map((a, idx) => validarArtigo(a, idx + 3, 'CARD'));
+  let selecionadosFinal = edicao.artigos_selecionados.map((a, idx) => validarArtigo(a, idx));
 
   const mapaResumos = {};
   artigos.forEach((a) => (mapaResumos[a.url] = a.resumo));
-  cards = await completarCards(cards, principais, validados, mapaResumos);
+  selecionadosFinal = await completarSelecionados(selecionadosFinal, validados, mapaResumos);
+
+  // Blog: garante fallback de imagem/url mesmo se a extração falhar.
+  const blogFinal = {
+    categoria: edicao.blog.categoria || 'Blog Lets',
+    titulo: edicao.blog.titulo,
+    url: blogRaw?.url || 'https://www.lets.com.br/blog',
+    fonte: 'Blog Lets',
+    imagem: blogRaw?.imagem || FALLBACK_BLOG_IMG,
+  };
 
   console.log(`✓ Edição ${edicaoAtual} gerada: "${edicao.titulo_edicao}"`);
-  console.log(`Principais: ${principais.length} | Cards: ${cards.length}`);
+  console.log(`Artigos selecionados: ${selecionadosFinal.length} | Blog: "${blogFinal.titulo}"`);
 
-  // "Salvar Edição" (upsert por edicao)
+  // "Salvar Edição" (upsert por edicao). json_artigos_cards fica sem uso a
+  // partir daqui (não existe mais divisão principais/cards) — mantido só
+  // pra não exigir migração destrutiva de coluna.
   const linha = {
     edicao: edicaoAtual,
     titulo_edicao: edicao.titulo_edicao,
     pre_header: edicao.pre_header,
-    json_artigos_principais: JSON.stringify(principais),
-    json_artigos_cards: JSON.stringify(cards),
+    json_artigos_principais: JSON.stringify(selecionadosFinal),
+    json_artigos_cards: JSON.stringify([]),
+    json_blog: JSON.stringify(blogFinal),
     json_cta: JSON.stringify(edicao.cta_final),
     status: 'pronto_envio_com_imagens',
     gerado_em: new Date().toISOString(),

@@ -41,6 +41,18 @@ function conectar() {
       enviado_em TEXT
     );
   `);
+
+  // Migração aditiva (jul/2026): fim da divisão principais/cards — agora
+  // json_artigos_principais guarda os 3 artigos selecionados (sem "cards"
+  // menores) e json_blog guarda o destaque do blog Lets (antes só vinha de
+  // scraping ao vivo no WF-03, sem persistir). json_artigos_cards fica sem
+  // uso a partir daqui, mas a coluna não é removida (evita migração
+  // destrutiva; linhas antigas continuam legíveis).
+  const colunasEdicoes = _db.prepare(`PRAGMA table_info(${config.abaEdicoes})`).all().map((c) => c.name);
+  if (!colunasEdicoes.includes('json_blog')) {
+    _db.exec(`ALTER TABLE ${config.abaEdicoes} ADD COLUMN json_blog TEXT`);
+  }
+
   return _db;
 }
 

@@ -1,27 +1,22 @@
 // Porte fiel do nó "Montar HTML1" (template Cerberus Hybrid, 600px, dark mode).
-// Recebe a linha da edição (com json_* parseáveis) + postBlogRecente do scraping.
-const FALLBACK_BLOG_IMG =
-  'https://cdn.prod.website-files.com/67d2cd7e700eb793f98a2e81/6a04acd2772388e00bdf5a8d_Gemini_Generated_Image_nmyoe6nmyoe6nmyo.png';
-
+// Recebe a linha da edição (com json_* parseáveis).
+//
+// jul/2026: fim da divisão principais/cards. Agora é uma lista única de 4
+// itens empilhados, no formato editorial do Brazil Journal: imagem cheia no
+// topo, texto centralizado, "Leia mais" como link em negrito embutido na
+// frase (sem botão) — o destaque do blog Lets primeiro, depois os 3 artigos
+// selecionados. O blog usa "Ler artigo" (os artigos usam "Ler matéria") e
+// entra com utm_content=blog; os demais usam noticia_N.
 const CDN_LOGO = 'https://cdn.mcauto-images-production.sendgrid.net/aead0c601c58f7b7/b50dc1d4-8f4c-42a7-8df1-f4fa39d98c24/87x86.png';
 const ICON_LINKEDIN = 'https://cdn.mcauto-images-production.sendgrid.net/aead0c601c58f7b7/edfb426e-900e-4c9a-866b-22ae164aeafe/48x48.png';
 const ICON_FACEBOOK = 'https://cdn.mcauto-images-production.sendgrid.net/aead0c601c58f7b7/98736dd2-68d2-4613-bdc5-024c87df3b29/48x48.png';
 const ICON_INSTAGRAM = 'https://cdn.mcauto-images-production.sendgrid.net/aead0c601c58f7b7/84c09a81-fb7b-4af7-a69b-596026bc4f85/48x48.png';
 const ICON_SITE = 'https://cdn.mcauto-images-production.sendgrid.net/aead0c601c58f7b7/9dbabf08-70a2-4b3b-ae0a-2c25d24d80d9/48x48.png';
 
-const formatarEdicaoExtenso = (edicaoStr) => {
-  const meses = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
-  const hoje = new Date();
-  const dia = String(hoje.getDate()).padStart(2, '0');
-  const mes = meses[hoje.getMonth()];
-  const ano = hoje.getFullYear();
-  return `EDIÇÃO ${edicaoStr} · ${dia} ${mes} ${ano}`;
-};
-
-// ─── Sanitização: todo texto/URL abaixo vem de RSS/busca web/scraping
-// (fontes externas) reescrito pela IA, que parafraseia mas não garante
-// remover HTML. Sem isso, um artigo malicioso injetaria HTML/links no
-// e-mail enviado pra base inteira de assinantes. ──────────────────────
+// ─── Sanitização: todo texto/URL abaixo vem de RSS/scraping (fontes
+// externas) reescrito pela IA, que parafraseia mas não garante remover
+// HTML. Sem isso, um artigo malicioso injetaria HTML/links no e-mail
+// enviado pra base inteira de assinantes. ──────────────────────────────
 const ESCAPES_HTML = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (valor) => String(valor ?? '').replace(/[&<>"']/g, (c) => ESCAPES_HTML[c]);
 
@@ -31,30 +26,32 @@ const safeURL = (url) => {
   return /^https?:\/\//i.test(s) ? esc(s) : '#';
 };
 
-const renderPrincipal = (art, isLast, idx) => {
+// Um item da lista (blog ou artigo), no formato editorial do Brazil Journal:
+// imagem cheia no topo, texto centralizado, "Leia mais" como link em negrito
+// embutido na frase (não botão). isLast controla o padding do divisor final;
+// isBlog troca o texto do link e o utm_content.
+const renderItem = (item, isLast, idx, isBlog) => {
   const padBaixo = isLast ? '0 32px 8px' : '0 32px';
+  const textoLink = isBlog ? 'Ler artigo' : 'Ler matéria';
+  const utmContent = isBlog ? 'blog' : `noticia_${idx}`;
   return `
   <tr>
-    <td bgcolor="#ffffff" class="dm-body-bg" style="background-color:#ffffff;padding:30px 32px;" align="left">
+    <td bgcolor="#ffffff" class="dm-body-bg" style="background-color:#ffffff;padding:24px 32px;" align="center">
       <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
         <tr>
-          <td valign="top" width="160" class="mob-stack mob-img-full" style="width:160px;padding-right:22px;">
-            <a href="${safeURL(art.url)}" target="_blank" style="text-decoration:none;"><img src="${safeURL(art.imagem)}" alt="${esc(art.categoria || 'Notícia')}" width="160" height="160" style="display:block;width:160px;height:160px;border-radius:6px;object-fit:cover;border:0;" /></a>
+          <td align="center" style="padding-bottom:14px;">
+            <a href="${safeURL(item.url)}" target="_blank" style="text-decoration:none;"><img src="${safeURL(item.imagem)}" alt="${esc(item.categoria || 'Notícia')}" width="536" style="display:block;width:100%;max-width:536px;height:auto;border-radius:6px;object-fit:cover;border:0;margin:0 auto;" /></a>
           </td>
-          <td valign="top" class="mob-stack mob-mt-16">
-            <div style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:10.5px;font-weight:700;color:#f15a22;letter-spacing:0.16em;text-transform:uppercase;margin-bottom:8px;">
-              ${esc(art.categoria || 'Notícia')}
+        </tr>
+        <tr>
+          <td align="center" style="text-align:center;">
+            <div style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:11px;font-weight:700;color:#f15a22;letter-spacing:0.16em;text-transform:uppercase;margin-bottom:8px;">
+              ${esc(item.categoria || 'Notícia')}
             </div>
-            <div class="dm-text-primary" style="margin:0 0 14px;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:15.5px;line-height:1.35;color:#12100b;">
-              ${esc(art.titulo)}
-            </div>
-            <!--[if mso]>
-            <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${safeURL(art.url)}" style="height:44px;v-text-anchor:middle;width:150px;" arcsize="8%" stroke="f" fillcolor="#f15a22"><w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI,Arial,sans-serif;font-size:13px;font-weight:bold;letter-spacing:0.5px;">Ler matéria</center></v:roundrect>
-            <![endif]-->
-            <!--[if !mso]><!-- -->
-            <a href="${safeURL(art.url)}?utm_source=newsletter&utm_medium=email&utm_campaign=insights&utm_content=principal_${idx + 1}" target="_blank" style="background-color:#f15a22;color:#ffffff;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:0.04em;text-decoration:none;padding:10px 20px;border-radius:3px;display:inline-block;mso-hide:all;">Ler matéria</a>
-            <!--<![endif]-->
-            <div style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:11px;color:#a09ca2;margin-top:10px;">Fonte: ${esc(art.fonte)}</div>
+            <p class="dm-text-primary" style="margin:0 0 10px;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:400;font-size:14px;line-height:1.55;color:#12100b;">
+              ${esc(item.titulo)} <a href="${safeURL(item.url)}?utm_source=newsletter&utm_medium=email&utm_campaign=insights&utm_content=${utmContent}" target="_blank" style="color:#f15a22;font-weight:700;text-decoration:none;white-space:nowrap;">&gt;&gt;&gt; ${textoLink}</a>
+            </p>
+            <div style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:11px;color:#a09ca2;">Fonte: ${esc(item.fonte)}</div>
           </td>
         </tr>
       </table>
@@ -64,95 +61,21 @@ const renderPrincipal = (art, isLast, idx) => {
   `;
 };
 
-const renderCard = (art, idx) => `
-    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
-      <tr><td><a href="${safeURL(art.url)}" target="_blank" style="text-decoration:none;"><img src="${safeURL(art.imagem)}" alt="${esc(art.categoria || 'Notícia')}" width="100%" height="120" style="display:block;width:100%;height:120px;object-fit:cover;border:0;" /></a></td></tr>
-      <tr><td style="height:14px;font-size:0;line-height:0;">&nbsp;</td></tr>
-      <tr><td class="dm-text-primary" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:14px;letter-spacing:0.08em;text-transform:uppercase;color:#12100b;padding-bottom:10px;">${esc(art.categoria || 'Notícia')}</td></tr>
-      <tr><td class="dm-text-primary" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:13px;line-height:1.4;color:#12100b;padding-bottom:14px;">${esc(art.titulo)}</td></tr>
-      <tr><td>
-        <!--[if mso]>
-        <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${safeURL(art.url)}" style="height:44px;v-text-anchor:middle;width:150px;" arcsize="8%" stroke="f" fillcolor="#f15a22"><w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI,Arial,sans-serif;font-size:13px;font-weight:bold;letter-spacing:0.5px;">Ler matéria</center></v:roundrect>
-        <![endif]-->
-        <!--[if !mso]><!-- -->
-        <a href="${safeURL(art.url)}?utm_source=newsletter&utm_medium=email&utm_campaign=insights&utm_content=card_${idx + 1}" target="_blank" style="background-color:#f15a22;color:#ffffff;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:0.04em;text-decoration:none;padding:10px 20px;border-radius:3px;display:inline-block;mso-hide:all;">Ler matéria</a>
-        <!--<![endif]-->
-      </td></tr>
-      <tr><td style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:11px;color:#a09ca2;padding-top:10px;">Fonte: ${esc(art.fonte)}</td></tr>
-    </table>
-`;
-
 export function montarHTML(dados) {
-  let principais, cards, cta;
-  try { principais = JSON.parse(dados.json_artigos_principais); } catch (e) { throw new Error('Falha parsear json_artigos_principais: ' + e.message); }
-  try { cards = JSON.parse(dados.json_artigos_cards); } catch (e) { throw new Error('Falha parsear json_artigos_cards: ' + e.message); }
+  let selecionados, cta, blog;
+  try { selecionados = JSON.parse(dados.json_artigos_principais); } catch (e) { throw new Error('Falha parsear json_artigos_principais: ' + e.message); }
   try { cta = JSON.parse(dados.json_cta); } catch (e) { throw new Error('Falha parsear json_cta: ' + e.message); }
+  try { blog = JSON.parse(dados.json_blog); } catch (e) { throw new Error('Falha parsear json_blog: ' + e.message); }
 
-  if (!Array.isArray(principais) || principais.length === 0) throw new Error('Edição sem artigos principais');
-  if (!Array.isArray(cards) || cards.length === 0) throw new Error('Edição sem artigos cards');
-  if (!cta || !cta.titulo) throw new Error('CTA inválido');
+  if (!Array.isArray(selecionados) || selecionados.length === 0) throw new Error('Edição sem artigos selecionados');
+  if (!blog || !blog.titulo) throw new Error('Edição sem destaque de blog');
 
-  const postScraping = dados.postBlogRecente;
-  const blogPost = postScraping && postScraping.titulo
-    ? { titulo: postScraping.titulo, url: postScraping.url, imagem: postScraping.imagem || FALLBACK_BLOG_IMG }
-    : { titulo: 'Confira novos conteúdos sobre gestão de frota no blog Lets.', url: 'https://www.lets.com.br/blog', imagem: FALLBACK_BLOG_IMG };
-
-  const edicaoFormatada = formatarEdicaoExtenso(dados.edicao);
   const preHeader = dados.pre_header || '';
 
-  const principaisHTML = principais
-    .slice(0, 3)
-    .map((art, idx, arr) => renderPrincipal(art, idx === arr.length - 1, idx))
+  const itens = [blog, ...selecionados];
+  const itensHTML = itens
+    .map((item, idx, arr) => renderItem(item, idx === arr.length - 1, idx, idx === 0))
     .join('');
-
-  const cardBlog = `
-    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="#f15a22" style="background-color:#f15a22;border-radius:4px;">
-      <tr>
-        <td style="padding:2px;">
-          <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="#ffffff" class="dm-body-bg" style="background-color:#ffffff;border-radius:3px;">
-            <tr><td><a href="${safeURL(blogPost.url)}" target="_blank" style="text-decoration:none;display:block;"><img src="${safeURL(blogPost.imagem)}" alt="Blog Lets" width="100%" height="120" style="display:block;width:100%;height:120px;object-fit:cover;border:0;" /></a></td></tr>
-            <tr><td style="height:12px;font-size:0;line-height:0;">&nbsp;</td></tr>
-            <tr><td style="padding:0 12px;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:#f15a22;">★ Última do Blog Lets</td></tr>
-            <tr><td style="height:8px;font-size:0;line-height:0;">&nbsp;</td></tr>
-            <tr><td class="dm-text-primary" style="padding:0 12px;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:13.5px;line-height:1.35;color:#12100b;">${esc(blogPost.titulo)}</td></tr>
-            <tr><td style="height:14px;font-size:0;line-height:0;">&nbsp;</td></tr>
-            <tr><td style="padding:0 12px 14px 12px;">
-              <!--[if mso]>
-              <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${safeURL(blogPost.url)}" style="height:44px;v-text-anchor:middle;width:150px;" arcsize="8%" stroke="f" fillcolor="#f15a22"><w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI,Arial,sans-serif;font-size:13px;font-weight:bold;letter-spacing:0.5px;">Ler artigo</center></v:roundrect>
-              <![endif]-->
-              <!--[if !mso]><!-- -->
-              <a href="${safeURL(blogPost.url)}" target="_blank" style="background-color:#f15a22;color:#ffffff;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:0.04em;text-decoration:none;padding:10px 20px;border-radius:3px;display:inline-block;mso-hide:all;">Ler artigo</a>
-              <!--<![endif]-->
-            </td></tr>
-          </table>
-        </td>
-      </tr>
-    </table>
-`;
-
-  const card0 = cards[0] ? renderCard(cards[0], 0) : '';
-  const card1 = cards[1] ? renderCard(cards[1], 1) : '';
-  const card2 = cards[2] ? renderCard(cards[2], 2) : '';
-
-  const gridCards = `
-          <tr>
-            <td bgcolor="#ffffff" class="dm-body-bg" style="background-color:#ffffff;padding:24px 32px 32px;">
-              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
-                <tr>
-                  <td valign="top" width="50%" class="mob-stack" style="width:50%;padding-right:14px;">${cardBlog}</td>
-                  <td valign="top" width="50%" class="mob-stack mob-stack-last" style="width:50%;padding-left:14px;">${card0}</td>
-                </tr>
-              </table>
-              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" class="mob-hide"><tr><td style="height:32px;font-size:0;line-height:0;">&nbsp;</td></tr></table>
-              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
-                <tr>
-                  <td valign="top" width="50%" class="mob-stack" style="width:50%;padding-right:14px;">${card1}</td>
-                  <td valign="top" width="50%" class="mob-stack mob-stack-last" style="width:50%;padding-left:14px;">${card2}</td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-`;
 
   const html_final = `<!doctype html>
 <html lang="pt-BR" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
@@ -177,7 +100,7 @@ export function montarHTML(dados) {
 
   <style type="text/css">
     html, body { margin: 0 !important; padding: 0 !important; height: 100% !important; width: 100% !important; }
-    body { background-color: #e9e9ec; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+    body { background-color: #ffffff; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
     table, td { border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
     img { border: 0; line-height: 100%; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; display: block; }
     a { text-decoration: none; color: #f15a22; }
@@ -216,46 +139,49 @@ export function montarHTML(dados) {
   </style>
 </head>
 
-<body class="dm-canvas-bg" style="margin:0;padding:0;background-color:#e9e9ec;font-family:'Open Sans','Segoe UI',Arial,sans-serif;">
+<body class="dm-canvas-bg" style="margin:0;padding:0;background-color:#ffffff;font-family:'Open Sans','Segoe UI',Arial,sans-serif;">
 
-  <div style="display:none;font-size:1px;color:#e9e9ec;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">
+  <div style="display:none;font-size:1px;color:#ffffff;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">
     ${esc(preHeader)}
     &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847; &#847;
   </div>
 
-  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" class="dm-canvas-bg" style="background-color:#e9e9ec;">
+  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" class="dm-canvas-bg" style="background-color:#ffffff;">
     <tr>
       <td align="center" style="padding:24px 0;" class="mob-banner-pad">
 
         <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="600" class="mob-wrap dm-body-bg" style="width:600px;max-width:600px;background-color:#ffffff;">
 
-          <!-- TOPO LARANJA -->
+          <!-- TOPO 1C — editorial centralizado -->
           <tr>
-            <td bgcolor="#f15a22" style="background-color:#f15a22;padding:28px 32px;" valign="middle" class="mob-banner-pad">
+            <td bgcolor="#ffffff" class="dm-body-bg" style="background-color:#ffffff;" align="center">
               <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
                 <tr>
-                  <td valign="middle" align="left">
-                    <table role="presentation" border="0" cellpadding="0" cellspacing="0">
-                      <tr>
-                        <td valign="middle" style="padding-right:12px;"><img src="${CDN_LOGO}" width="36" height="36" alt="Lets" style="display:block;width:36px;height:36px;"></td>
-                        <td valign="middle" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:22px;color:#ffffff;letter-spacing:-0.005em;">Insights</td>
-                      </tr>
-                    </table>
+                  <td align="center" style="padding:32px 32px 4px;text-align:center;">
+                    <img src="${CDN_LOGO}" width="58" height="57" alt="Let's" style="display:inline-block;width:58px;height:57px;">
                   </td>
-                  <td valign="middle" align="right" class="mob-hide" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;text-align:right;">
-                    <div style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:13px;color:#ffffff;letter-spacing:0.06em;text-transform:uppercase;white-space:nowrap;line-height:1.2;">${esc(edicaoFormatada)}</div>
+                </tr>
+                <tr>
+                  <td align="center" style="padding:4px 32px 22px;text-align:center;">
+                    <span style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:800;font-size:42px;letter-spacing:-0.01em;color:#12100b;">Insights</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:0 32px 28px;">
+                    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%"><tr><td style="border-top:2px solid #f15a22;font-size:0;line-height:0;">&nbsp;</td></tr></table>
                   </td>
                 </tr>
               </table>
             </td>
           </tr>
 
-          ${principaisHTML}
-
-          ${gridCards}
+          ${itensHTML}
 
           <tr>
-            <td bgcolor="#e9eff8" class="dm-editorial-bg" style="background-color:#e9eff8;padding:36px 40px 40px;text-align:center;" align="center">
+            <td bgcolor="#ffffff" class="dm-editorial-bg" style="background-color:#ffffff;padding:36px 40px 40px;text-align:center;" align="center">
+              <div class="dm-text-muted" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:11px;font-weight:700;color:#a09ca2;letter-spacing:0.16em;text-transform:uppercase;margin-bottom:10px;">
+                Let's
+              </div>
               <div class="dm-text-primary" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:20px;line-height:1.25;color:#12100b;letter-spacing:-0.01em;margin-bottom:14px;max-width:460px;margin-left:auto;margin-right:auto;">
                 ${esc(cta.titulo)}
               </div>
@@ -272,41 +198,27 @@ export function montarHTML(dados) {
           </tr>
 
 
-          <tr><td style="height:24px;font-size:0;line-height:0;background-color:#e9eff8;">&nbsp;</td></tr>
+          <tr><td style="height:24px;font-size:0;line-height:0;background-color:#ffffff;">&nbsp;</td></tr>
 
           <tr>
-            <td bgcolor="#f15a22" style="background-color:#f15a22;padding:32px 32px 28px;color:#ffffff;">
-              <!--[if mso]>
-              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="504"><tr>
-              <td valign="top" width="232" style="width:232px;padding-right:20px;vertical-align:top;">
-              <![endif]-->
-              <div class="mob-stack" style="display:inline-block;vertical-align:top;width:100%;max-width:232px;">
-                <div style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:14px;color:#ffffff;letter-spacing:0.04em;margin-bottom:14px;">Siga a Lets</div>
-                <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="margin-bottom:16px;">
-                  <tr>
-                    <td style="padding-right:8px;"><a href="https://www.linkedin.com/company/lets-frotas?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" style="text-decoration:none;"><img src="${ICON_LINKEDIN}" width="26" height="26" alt="LinkedIn" style="display:block;border:0;width:26px;height:26px;"></a></td>
-                    <td style="padding-right:8px;"><a href="https://www.facebook.com/letsfrotas?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" style="text-decoration:none;"><img src="${ICON_FACEBOOK}" width="26" height="26" alt="Facebook" style="display:block;border:0;width:26px;height:26px;"></a></td>
-                    <td style="padding-right:8px;"><a href="https://www.instagram.com/lets.frotas/?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" style="text-decoration:none;"><img src="${ICON_INSTAGRAM}" width="26" height="26" alt="Instagram" style="display:block;border:0;width:26px;height:26px;"></a></td>
-                    <td><a href="https://www.lets.com.br/?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" style="text-decoration:none;"><img src="${ICON_SITE}" width="26" height="26" alt="Site" style="display:block;border:0;width:26px;height:26px;"></a></td>
-                  </tr>
-                </table>
-                <p style="margin:0;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:11.5px;line-height:1.55;color:rgba(255,255,255,0.85);">Você recebe Lets Insights porque se cadastrou em lets.com.br ou interagiu com nossa equipe.</p>
-              </div>
-              <!--[if mso]>
-              </td>
-              <td valign="top" width="232" style="width:232px;padding-left:20px;vertical-align:top;">
-              <![endif]-->
-              <div class="mob-stack mob-mt-16" style="display:inline-block;vertical-align:top;width:100%;max-width:232px;">
-                <table role="presentation" border="0" cellpadding="0" cellspacing="0">
-                  <tr><td style="padding-bottom:14px;"><img src="${CDN_LOGO}" width="44" height="44" alt="Lets" style="display:block;width:44px;height:44px;"></td></tr>
-                  <tr><td style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:800;font-size:15px;color:#ffffff;letter-spacing:0.02em;padding-bottom:10px;">Lets · Gestão de Frotas</td></tr>
-                  <tr><td style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:12px;line-height:1.55;color:rgba(255,255,255,0.85);padding-bottom:18px;">Av. Jerônimo Vervloet, 345<br>Maria Ortiz, Vitória ES</td></tr>
-                  <tr><td style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:10.5px;line-height:1.5;color:rgba(255,255,255,0.85);letter-spacing:0.02em;">Lets é uma empresa do portfólio VIXPar, Grupo Águia Branca.</td></tr>
-                </table>
-              </div>
-              <!--[if mso]>
-              </td></tr></table>
-              <![endif]-->
+            <td bgcolor="#f15a22" style="background-color:#f15a22;padding:16px 32px;" valign="middle">
+              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+                <tr>
+                  <td valign="middle" width="50%" align="left" style="width:50%;">
+                    <img src="${CDN_LOGO}" width="44" height="44" alt="Lets" style="display:block;width:44px;height:44px;">
+                  </td>
+                  <td valign="middle" width="50%" align="right" style="width:50%;">
+                    <table role="presentation" border="0" cellpadding="0" cellspacing="0" align="right">
+                      <tr>
+                        <td style="padding-right:8px;"><a href="https://www.linkedin.com/company/lets-frotas?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" style="text-decoration:none;"><img src="${ICON_LINKEDIN}" width="26" height="26" alt="LinkedIn" style="display:block;border:0;width:26px;height:26px;"></a></td>
+                        <td style="padding-right:8px;"><a href="https://www.facebook.com/letsfrotas?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" style="text-decoration:none;"><img src="${ICON_FACEBOOK}" width="26" height="26" alt="Facebook" style="display:block;border:0;width:26px;height:26px;"></a></td>
+                        <td style="padding-right:8px;"><a href="https://www.instagram.com/lets.frotas/?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" style="text-decoration:none;"><img src="${ICON_INSTAGRAM}" width="26" height="26" alt="Instagram" style="display:block;border:0;width:26px;height:26px;"></a></td>
+                        <td><a href="https://www.lets.com.br/?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" style="text-decoration:none;"><img src="${ICON_SITE}" width="26" height="26" alt="Site" style="display:block;border:0;width:26px;height:26px;"></a></td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
         </table>
@@ -319,8 +231,8 @@ export function montarHTML(dados) {
 </html>`;
 
   // Remove quebras de linha do assunto: vira header de e-mail (Subject:), e
-  // titulo_edicao é influenciado por conteúdo externo (RSS/busca web) via a
-  // reescrita da IA, então não dá pra confiar que nunca vem com \r\n.
+  // titulo_edicao é influenciado por conteúdo externo (RSS) via a reescrita
+  // da IA, então não dá pra confiar que nunca vem com \r\n.
   const semQuebraDeLinha = (s) => String(s ?? '').replace(/[\r\n]+/g, ' ').trim();
 
   return {
@@ -329,8 +241,6 @@ export function montarHTML(dados) {
     titulo_edicao: dados.titulo_edicao,
     pre_header: preHeader,
     html_final,
-    qtd_principais: principais.length,
-    qtd_cards: cards.length,
-    tem_blog_destaque: !!postScraping,
+    qtd_itens: itens.length,
   };
 }
