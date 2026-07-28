@@ -40,7 +40,7 @@ const renderItem = (item, isLast, idx, isBlog) => {
       <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
         <tr>
           <td align="center" style="padding-bottom:14px;">
-            <a href="${safeURL(item.url)}" target="_blank" style="text-decoration:none;"><img src="${safeURL(item.imagem)}" alt="${esc(item.categoria || 'Notícia')}" width="536" style="display:block;width:100%;max-width:536px;height:auto;border-radius:6px;object-fit:cover;border:0;margin:0 auto;" /></a>
+            <a href="${safeURL(item.url)}" target="_blank" style="text-decoration:none;"><img src="${safeURL(item.imagem)}" alt="${esc(item.categoria || 'Notícia')}" width="536" style="display:block;width:100%;max-width:536px;height:auto;object-fit:cover;border:0;margin:0 auto;" /></a>
           </td>
         </tr>
         <tr>
@@ -62,13 +62,15 @@ const renderItem = (item, isLast, idx, isBlog) => {
 };
 
 export function montarHTML(dados) {
-  let selecionados, cta, blog;
+  let selecionados, cta, blog, manchetes;
   try { selecionados = JSON.parse(dados.json_artigos_principais); } catch (e) { throw new Error('Falha parsear json_artigos_principais: ' + e.message); }
   try { cta = JSON.parse(dados.json_cta); } catch (e) { throw new Error('Falha parsear json_cta: ' + e.message); }
   try { blog = JSON.parse(dados.json_blog); } catch (e) { throw new Error('Falha parsear json_blog: ' + e.message); }
+  try { manchetes = JSON.parse(dados.json_assunto_manchetes); } catch (e) { throw new Error('Falha parsear json_assunto_manchetes: ' + e.message); }
 
   if (!Array.isArray(selecionados) || selecionados.length === 0) throw new Error('Edição sem artigos selecionados');
   if (!blog || !blog.titulo) throw new Error('Edição sem destaque de blog');
+  if (!Array.isArray(manchetes) || manchetes.length === 0) throw new Error('Edição sem manchetes de assunto');
 
   const preHeader = dados.pre_header || '';
 
@@ -204,18 +206,27 @@ export function montarHTML(dados) {
             <td bgcolor="#f15a22" style="background-color:#f15a22;padding:16px 32px;" valign="middle">
               <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
                 <tr>
-                  <td valign="middle" width="50%" align="left" style="width:50%;">
-                    <img src="${CDN_LOGO}" width="44" height="44" alt="Lets" style="display:block;width:44px;height:44px;">
-                  </td>
-                  <td valign="middle" width="50%" align="right" style="width:50%;">
-                    <table role="presentation" border="0" cellpadding="0" cellspacing="0" align="right">
+                  <td valign="middle" width="50%" align="left" style="width:50%;text-align:left;">
+                    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="144" align="left" style="width:144px;">
                       <tr>
-                        <td style="padding-right:8px;"><a href="https://www.linkedin.com/company/lets-frotas?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" style="text-decoration:none;"><img src="${ICON_LINKEDIN}" width="26" height="26" alt="LinkedIn" style="display:block;border:0;width:26px;height:26px;"></a></td>
-                        <td style="padding-right:8px;"><a href="https://www.facebook.com/letsfrotas?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" style="text-decoration:none;"><img src="${ICON_FACEBOOK}" width="26" height="26" alt="Facebook" style="display:block;border:0;width:26px;height:26px;"></a></td>
-                        <td style="padding-right:8px;"><a href="https://www.instagram.com/lets.frotas/?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" style="text-decoration:none;"><img src="${ICON_INSTAGRAM}" width="26" height="26" alt="Instagram" style="display:block;border:0;width:26px;height:26px;"></a></td>
-                        <td><a href="https://www.lets.com.br/?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" style="text-decoration:none;"><img src="${ICON_SITE}" width="26" height="26" alt="Site" style="display:block;border:0;width:26px;height:26px;"></a></td>
+                        <td align="left" style="text-align:left;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:12px;font-weight:700;color:#ffffff;letter-spacing:0.04em;padding-bottom:8px;">Siga a Let's</td>
+                      </tr>
+                      <tr>
+                        <td align="left">
+                          <table role="presentation" border="0" cellpadding="0" cellspacing="0" align="left">
+                            <tr>
+                              <td style="padding-right:10px;"><a href="https://www.linkedin.com/company/lets-frotas?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" style="text-decoration:none;"><img src="${ICON_LINKEDIN}" width="26" height="26" alt="LinkedIn" style="display:block;border:0;width:26px;height:26px;"></a></td>
+                              <td style="padding-right:10px;"><a href="https://www.facebook.com/letsfrotas?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" style="text-decoration:none;"><img src="${ICON_FACEBOOK}" width="26" height="26" alt="Facebook" style="display:block;border:0;width:26px;height:26px;"></a></td>
+                              <td style="padding-right:10px;"><a href="https://www.instagram.com/lets.frotas/?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" style="text-decoration:none;"><img src="${ICON_INSTAGRAM}" width="26" height="26" alt="Instagram" style="display:block;border:0;width:26px;height:26px;"></a></td>
+                              <td><a href="https://www.lets.com.br/?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" style="text-decoration:none;"><img src="${ICON_SITE}" width="26" height="26" alt="Site" style="display:block;border:0;width:26px;height:26px;"></a></td>
+                            </tr>
+                          </table>
+                        </td>
                       </tr>
                     </table>
+                  </td>
+                  <td valign="middle" width="50%" align="right" style="width:50%;text-align:right;">
+                    <a href="https://www.lets.com.br/?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=logo_footer" style="text-decoration:none;display:inline-block;"><img src="${CDN_LOGO}" width="44" height="44" alt="Lets" style="display:block;width:44px;height:44px;"></a>
                   </td>
                 </tr>
               </table>
@@ -231,13 +242,17 @@ export function montarHTML(dados) {
 </html>`;
 
   // Remove quebras de linha do assunto: vira header de e-mail (Subject:), e
-  // titulo_edicao é influenciado por conteúdo externo (RSS) via a reescrita
-  // da IA, então não dá pra confiar que nunca vem com \r\n.
+  // as manchetes/titulo_edicao são influenciados por conteúdo externo (RSS)
+  // via a reescrita da IA, então não dá pra confiar que nunca vem com \r\n.
   const semQuebraDeLinha = (s) => String(s ?? '').replace(/[\r\n]+/g, ' ').trim();
+
+  // Formato Brazil Journal: manchetes curtas separadas por ponto e vírgula,
+  // terminando com o nome da newsletter depois de «.
+  const assunto = `${manchetes.join('; ')} « Let's Insights`;
 
   return {
     edicao: dados.edicao,
-    assunto_preview: semQuebraDeLinha(`[Ed. ${dados.edicao}] ${dados.titulo_edicao}`),
+    assunto_preview: semQuebraDeLinha(assunto),
     titulo_edicao: dados.titulo_edicao,
     pre_header: preHeader,
     html_final,
