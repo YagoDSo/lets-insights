@@ -22,6 +22,14 @@ export const config = {
 
   // E-goi (relatórios de campanhas — ver lib/egoi-reports.js)
   egoiApiKey: process.env.EGOI_API_KEY,
+
+  // E-goi (criação de rascunhos "POR PUBLICAR" — ver lib/egoi-campaign.js)
+  egoiSenderId: Number(process.env.EGOI_SENDER_ID) || 2, // "Let's Terceirização de Frotas" <lets@lets.com.br>
+  egoiListas: [
+    { id: Number(process.env.EGOI_LIST_GESTORES) || 67, nome: 'Gestores 2025' },
+    { id: Number(process.env.EGOI_LIST_CONDUTORES) || 34, nome: 'Condutores 2023' },
+    { id: Number(process.env.EGOI_LIST_BASE_LETS) || 69, nome: "Base de Usuários Let's" },
+  ],
 };
 
 // Falha cedo e com mensagem clara se faltar credencial obrigatória.

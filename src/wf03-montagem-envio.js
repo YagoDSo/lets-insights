@@ -12,6 +12,7 @@ import { config, requireEnv } from './lib/config.js';
 import { lerAba, upsertLinhas, commitarBanco } from './lib/db.js';
 import { montarHTML } from './lib/template.js';
 import { enviarPreview } from './lib/sender.js';
+import { criarRascunho } from './lib/egoi-campaign.js';
 
 // ─── Orquestração ────────────────────────────────────────────
 async function main() {
@@ -53,6 +54,26 @@ async function main() {
     para: config.previewTo,
   });
   console.log(`✓ Preview enviado para ${config.previewTo} (messageId: ${messageId}) — 3 variantes de CTA em anexo`);
+
+  // Rascunhos "POR PUBLICAR" no E-goi, um por lista, pra revisão manual
+  // antes do envio real. Só CRIA (status "draft") — nunca dispara
+  // /actions/send; isso continua exigindo autorização explícita do Yago
+  // a cada campanha, na hora que ele mesmo decidir enviar pelo E-goi.
+  // Falha aqui não derruba o WF-03: o preview do Gmail (passo crítico
+  // de validação) já foi enviado com sucesso acima.
+  for (const lista of config.egoiListas) {
+    try {
+      const hash = await criarRascunho({
+        listId: lista.id,
+        internalName: `POR PUBLICAR · ${principal.titulo_edicao} · ${lista.nome}`,
+        subject: principal.assunto_preview,
+        html: principal.html_final,
+      });
+      console.log(`✓ Rascunho E-goi criado (${lista.nome}): ${hash}`);
+    } catch (e) {
+      console.error(`✗ Falha ao criar rascunho E-goi (${lista.nome}):`, e.message);
+    }
+  }
 
   // "Confirmar Preview1" + "Atualizar Status1"
   // (Correção do bug conhecido: grava na aba Edicoes, preservando as demais colunas.)
