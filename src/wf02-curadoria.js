@@ -300,12 +300,6 @@ Gere também:
    - botao (texto do botão, ex: "FALAR COM ESPECIALISTA")
    - VARIAÇÃO OBRIGATÓRIA: não repita sempre o mesmo gancho de "laudo/RAC2 vencido" só porque é um exemplo comum de outras edições — o gancho deve mudar conforme o tema real dos artigos selecionados nesta chamada.
 
-4. ASSUNTO_MANCHETES (vira o Assunto do e-mail, formato Brazil Journal: manchetes curtas separadas por ponto e vírgula, terminando com o nome da newsletter depois de «)
-   - Gere exatamente 2 frases BEM curtas (cada uma MÁX 40 caracteres, de verdade curto, tipo manchete de jornal impresso), escolhendo as 2 chamadas mais fortes entre os 3 artigos e o destaque do blog desta edição (nem sempre precisam ser os 2 primeiros da lista, use julgamento editorial de qual gancho é mais forte pro assunto).
-   - Direto ao ponto: sem prefixo de categoria, sem contexto extra, só o fato mais forte em poucas palavras. Corte qualquer palavra que não seja essencial.
-   - Nunca travessão (use dois-pontos, ponto e vírgula ou "e" se precisar conectar). Não precisa repetir o título completo do artigo: reescreva bem mais curto pro contexto de assunto de e-mail.
-   - NÃO inclua o nome da newsletter nem o "«" nas frases — isso é concatenado depois, à parte.
-
 Retorne APENAS JSON válido (sem markdown):
 {
   "titulo_edicao": "...",
@@ -314,8 +308,7 @@ Retorne APENAS JSON válido (sem markdown):
     {"categoria": "...", "titulo": "...", "url": "...", "fonte": "...", "imagem": "..."}
   ],
   "blog": {"categoria": "Blog Lets", "titulo": "..."},
-  "cta_final": {"titulo": "...", "texto": "...", "botao": "..."},
-  "assunto_manchetes": ["...", "..."]
+  "cta_final": {"titulo": "...", "texto": "...", "botao": "..."}
 }
 
 ARTIGOS (ordenados por score):
@@ -562,14 +555,11 @@ async function main() {
   }
 
   // "Parse Edição Final + Validar URLs"
-  const obrigatorios = ['titulo_edicao', 'pre_header', 'artigos_selecionados', 'blog', 'cta_final', 'assunto_manchetes'];
+  const obrigatorios = ['titulo_edicao', 'pre_header', 'artigos_selecionados', 'blog', 'cta_final'];
   const faltando = obrigatorios.filter((c) => !edicao[c]);
   if (faltando.length > 0) throw new Error(`Campos faltando: ${faltando.join(', ')}`);
   if (!Array.isArray(edicao.artigos_selecionados) || edicao.artigos_selecionados.length === 0) {
     throw new Error('artigos_selecionados inválido ou vazio');
-  }
-  if (!Array.isArray(edicao.assunto_manchetes) || edicao.assunto_manchetes.length === 0) {
-    throw new Error('assunto_manchetes inválido ou vazio');
   }
 
   // Integridade de URL: corrige URL/fonte/imagem caso a IA tenha inventado.
@@ -617,7 +607,6 @@ async function main() {
     json_artigos_cards: JSON.stringify([]),
     json_blog: JSON.stringify(blogFinal),
     json_cta: JSON.stringify(edicao.cta_final),
-    json_assunto_manchetes: JSON.stringify(edicao.assunto_manchetes),
     status: 'pronto_envio_com_imagens',
     gerado_em: new Date().toISOString(),
   };

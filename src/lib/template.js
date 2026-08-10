@@ -61,23 +61,84 @@ const renderItem = (item, isLast, idx, isBlog) => {
   `;
 };
 
-export function montarHTML(dados) {
-  let selecionados, cta, blog, manchetes;
+export function montarHTML(dados, opts = {}) {
+  let selecionados, cta, blog;
   try { selecionados = JSON.parse(dados.json_artigos_principais); } catch (e) { throw new Error('Falha parsear json_artigos_principais: ' + e.message); }
   try { cta = JSON.parse(dados.json_cta); } catch (e) { throw new Error('Falha parsear json_cta: ' + e.message); }
   try { blog = JSON.parse(dados.json_blog); } catch (e) { throw new Error('Falha parsear json_blog: ' + e.message); }
-  try { manchetes = JSON.parse(dados.json_assunto_manchetes); } catch (e) { throw new Error('Falha parsear json_assunto_manchetes: ' + e.message); }
 
   if (!Array.isArray(selecionados) || selecionados.length === 0) throw new Error('Edição sem artigos selecionados');
   if (!blog || !blog.titulo) throw new Error('Edição sem destaque de blog');
-  if (!Array.isArray(manchetes) || manchetes.length === 0) throw new Error('Edição sem manchetes de assunto');
+
+  // Teste A/B de posição do CTA (opts.ctaPosicao: 'inicio' | 'meio' | 'fim',
+  // default 'fim' = comportamento original). Cada posição exige um texto
+  // diferente porque a quantidade de conteúdo já "lido" quando o CTA aparece
+  // muda: 'inicio' não pode referenciar nenhum artigo (nada foi mostrado
+  // ainda, precisa ser pitch genérico da empresa); 'meio' pode referenciar
+  // só os 2 primeiros itens (blog + 1º artigo); 'fim' pode referenciar a
+  // edição inteira (comportamento normal, texto vem do json_cta da IA).
+  // opts.ctaOverride injeta a copy quando não é 'fim'.
+  const ctaPosicao = opts.ctaPosicao || 'fim';
+  const ctaConteudo = opts.ctaOverride || cta;
+  const ctaComKicker = ctaPosicao !== 'inicio'; // sem conteúdo anterior, não há "troca de registro" pra marcar
+  const botaoMaior = ctaPosicao === 'inicio';
 
   const preHeader = dados.pre_header || '';
 
   const itens = [blog, ...selecionados];
-  const itensHTML = itens
-    .map((item, idx, arr) => renderItem(item, idx === arr.length - 1, idx, idx === 0))
-    .join('');
+  const renderSubset = (de, ate) =>
+    itens
+      .slice(de, ate)
+      .map((item, i) => {
+        const idx = de + i;
+        return renderItem(item, idx === itens.length - 1, idx, idx === 0);
+      })
+      .join('');
+
+  const botaoFontSize = botaoMaior ? '16px' : '13px';
+  const botaoPadding = botaoMaior ? '20px 44px' : '16px 32px';
+  const botaoAlturaMso = botaoMaior ? '60px' : '52px';
+  const botaoLarguraMso = botaoMaior ? '360px' : '320px';
+
+  // Espaço depois do bloco de CTA: 'inicio' segue reto pro 1º item (só um
+  // respiro pequeno); 'meio' volta pro clima editorial com um divisor laranja
+  // igual ao dos itens; 'fim' é o espaçador branco original antes do rodapé.
+  const espacoDepoisCTA =
+    ctaPosicao === 'inicio'
+      ? `<tr><td style="height:8px;font-size:0;line-height:0;background-color:#ffffff;">&nbsp;</td></tr>`
+      : ctaPosicao === 'meio'
+        ? `<tr><td style="padding:0 40px 24px;background-color:#ffffff;"><table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%"><tr><td style="border-top:1px solid #f15a22;font-size:0;line-height:0;">&nbsp;</td></tr></table></td></tr>`
+        : `<tr><td style="height:24px;font-size:0;line-height:0;background-color:#ffffff;">&nbsp;</td></tr>`;
+
+  const ctaBlockHTML = `
+          <tr>
+            <td bgcolor="#ffffff" class="dm-editorial-bg" style="background-color:#ffffff;padding:36px 40px 40px;text-align:center;" align="center">
+              ${!ctaComKicker ? '' : `<div class="dm-text-muted" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:11px;font-weight:700;color:#a09ca2;letter-spacing:0.16em;text-transform:uppercase;margin-bottom:10px;">
+                Let's
+              </div>`}
+              <div class="dm-text-primary" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:20px;line-height:1.25;color:#12100b;letter-spacing:-0.01em;margin-bottom:14px;max-width:460px;margin-left:auto;margin-right:auto;">
+                ${esc(ctaConteudo.titulo)}
+              </div>
+              <p class="dm-text-body" style="margin:0 auto 24px;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:13.5px;line-height:1.6;color:#2f323b;max-width:460px;">
+                ${esc(ctaConteudo.texto || '')}
+              </p>
+              <!--[if mso]>
+              <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="https://www.lets.com.br/solicitar-proposta" style="height:${botaoAlturaMso};v-text-anchor:middle;width:${botaoLarguraMso};" arcsize="8%" stroke="f" fillcolor="#f15a22"><w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI, Arial, sans-serif;font-size:${botaoFontSize};font-weight:bold;letter-spacing:1px">FALAR COM ESPECIALISTA</center></v:roundrect>
+              <![endif]-->
+              <!--[if !mso]><!-- -->
+              <a href="https://www.lets.com.br/solicitar-proposta?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" target="_blank" style="background-color:#f15a22;color:#ffffff;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:${botaoFontSize};font-weight:700;letter-spacing:0.08em;text-transform:uppercase;text-decoration:none;padding:${botaoPadding};border-radius:3px;display:inline-block;mso-hide:all;">FALAR COM ESPECIALISTA</a>
+              <!--<![endif]-->
+            </td>
+          </tr>
+          ${espacoDepoisCTA}
+  `;
+
+  const corpoHTML =
+    ctaPosicao === 'inicio'
+      ? `${ctaBlockHTML}${renderSubset(0, itens.length)}`
+      : ctaPosicao === 'meio'
+        ? `${renderSubset(0, 2)}${ctaBlockHTML}${renderSubset(2, itens.length)}`
+        : `${renderSubset(0, itens.length)}${ctaBlockHTML}`;
 
   const html_final = `<!doctype html>
 <html lang="pt-BR" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
@@ -177,30 +238,7 @@ export function montarHTML(dados) {
             </td>
           </tr>
 
-          ${itensHTML}
-
-          <tr>
-            <td bgcolor="#ffffff" class="dm-editorial-bg" style="background-color:#ffffff;padding:36px 40px 40px;text-align:center;" align="center">
-              <div class="dm-text-muted" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:11px;font-weight:700;color:#a09ca2;letter-spacing:0.16em;text-transform:uppercase;margin-bottom:10px;">
-                Let's
-              </div>
-              <div class="dm-text-primary" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:20px;line-height:1.25;color:#12100b;letter-spacing:-0.01em;margin-bottom:14px;max-width:460px;margin-left:auto;margin-right:auto;">
-                ${esc(cta.titulo)}
-              </div>
-              <p class="dm-text-body" style="margin:0 auto 24px;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:13.5px;line-height:1.6;color:#2f323b;max-width:460px;">
-                ${esc(cta.texto || '')}
-              </p>
-              <!--[if mso]>
-              <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="https://www.lets.com.br/solicitar-proposta" style="height:52px;v-text-anchor:middle;width:320px;" arcsize="8%" stroke="f" fillcolor="#f15a22"><w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI, Arial, sans-serif;font-size:13px;font-weight:bold;letter-spacing:1px">FALAR COM ESPECIALISTA</center></v:roundrect>
-              <![endif]-->
-              <!--[if !mso]><!-- -->
-              <a href="https://www.lets.com.br/solicitar-proposta?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" target="_blank" style="background-color:#f15a22;color:#ffffff;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:13px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;text-decoration:none;padding:16px 32px;border-radius:3px;display:inline-block;mso-hide:all;">FALAR COM ESPECIALISTA</a>
-              <!--<![endif]-->
-            </td>
-          </tr>
-
-
-          <tr><td style="height:24px;font-size:0;line-height:0;background-color:#ffffff;">&nbsp;</td></tr>
+          ${corpoHTML}
 
           <tr>
             <td bgcolor="#f15a22" style="background-color:#f15a22;padding:16px 32px;" valign="middle">
@@ -242,13 +280,11 @@ export function montarHTML(dados) {
 </html>`;
 
   // Remove quebras de linha do assunto: vira header de e-mail (Subject:), e
-  // as manchetes/titulo_edicao são influenciados por conteúdo externo (RSS)
-  // via a reescrita da IA, então não dá pra confiar que nunca vem com \r\n.
+  // o titulo_edicao é influenciado por conteúdo externo (RSS) via a
+  // reescrita da IA, então não dá pra confiar que nunca vem com \r\n.
   const semQuebraDeLinha = (s) => String(s ?? '').replace(/[\r\n]+/g, ' ').trim();
 
-  // Formato Brazil Journal: manchetes curtas separadas por ponto e vírgula,
-  // terminando com o nome da newsletter depois de «.
-  const assunto = `${manchetes.join('; ')} « Let's Insights`;
+  const assunto = dados.titulo_edicao;
 
   return {
     edicao: dados.edicao,

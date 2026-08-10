@@ -52,9 +52,10 @@ function conectar() {
   if (!colunasEdicoes.includes('json_blog')) {
     _db.exec(`ALTER TABLE ${config.abaEdicoes} ADD COLUMN json_blog TEXT`);
   }
-  // Migração aditiva (jul/2026): assunto do e-mail passa a ser gerado no
-  // formato Brazil Journal (manchetes curtas + nome da newsletter), em vez
-  // de reaproveitar titulo_edicao. Guarda as manchetes geradas na redação.
+  // Migração aditiva (jul/2026, revertida ago/2026 — ver CLAUDE.md regra 7):
+  // assunto chegou a usar formato Brazil Journal (manchetes curtas geradas
+  // à parte); voltou a reaproveitar titulo_edicao. Coluna mantida sem uso
+  // pra não exigir migração destrutiva (edições 8-9 continuam legíveis).
   if (!colunasEdicoes.includes('json_assunto_manchetes')) {
     _db.exec(`ALTER TABLE ${config.abaEdicoes} ADD COLUMN json_assunto_manchetes TEXT`);
   }

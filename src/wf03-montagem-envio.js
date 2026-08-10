@@ -30,20 +30,29 @@ async function main() {
   const selected = prontas.sort((a, b) => String(b.edicao).localeCompare(String(a.edicao)))[0];
   console.log(`Edição selecionada: ${selected.edicao} - ${selected.titulo_edicao}`);
 
-  // "Montar HTML1"
-  const montado = montarHTML(selected);
-  console.log(`Edição ${montado.edicao} | Itens: ${montado.qtd_itens} | HTML: ${montado.html_final.length} chars`);
+  // "Montar HTML1" — teste A/B de posição do CTA: gera as 3 variantes
+  // (início/meio/fim), todas com o mesmo texto de CTA (json_cta), só
+  // mudando posição/estilo do botão. "fim" é o comportamento de produção
+  // (vai no corpo do e-mail); as 3 vão em anexo pra comparação.
+  const variantes = ['inicio', 'meio', 'fim'].map((ctaPosicao) => ({
+    ctaPosicao,
+    montado: montarHTML(selected, { ctaPosicao }),
+  }));
+  const principal = variantes.find((v) => v.ctaPosicao === 'fim').montado;
+  console.log(`Edição ${principal.edicao} | Itens: ${principal.qtd_itens} | HTML: ${principal.html_final.length} chars`);
 
   // "Criar Anexo HTML1" + "Gmail - Enviar Preview1"
-  const anexo = Buffer.from(montado.html_final, 'utf-8');
+  const anexos = variantes.map((v) => ({
+    filename: `lets_insights_${selected.edicao}_cta_${v.ctaPosicao}.html`,
+    content: Buffer.from(v.montado.html_final, 'utf-8'),
+  }));
   const messageId = await enviarPreview({
-    assunto: montado.assunto_preview,
-    html: montado.html_final,
-    anexoNome: `lets_insights_${selected.edicao}.html`,
-    anexoConteudo: anexo,
+    assunto: principal.assunto_preview,
+    html: principal.html_final,
+    anexos,
     para: config.previewTo,
   });
-  console.log(`✓ Preview enviado para ${config.previewTo} (messageId: ${messageId})`);
+  console.log(`✓ Preview enviado para ${config.previewTo} (messageId: ${messageId}) — 3 variantes de CTA em anexo`);
 
   // "Confirmar Preview1" + "Atualizar Status1"
   // (Correção do bug conhecido: grava na aba Edicoes, preservando as demais colunas.)
