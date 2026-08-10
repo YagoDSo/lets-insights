@@ -19,6 +19,9 @@ export const config = {
   gmailUser: process.env.GMAIL_USER,
   gmailAppPassword: process.env.GMAIL_APP_PASSWORD,
   previewTo: process.env.PREVIEW_TO || process.env.GMAIL_USER,
+
+  // E-goi (relatórios de campanhas — ver lib/egoi-reports.js)
+  egoiApiKey: process.env.EGOI_API_KEY,
 };
 
 // Falha cedo e com mensagem clara se faltar credencial obrigatória.
