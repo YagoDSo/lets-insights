@@ -46,6 +46,8 @@ export async function listarCampanhas({
 }
 
 // Relatório de uma campanha de email (GET /reports/email/{campaign_hash}).
+// Inclui detalhamento por URL (cliques por link), usado pra calcular a
+// taxa de clique no CTA especificamente.
 export async function relatorioEmail(campaignHash) {
-  return egoiGet(`/reports/email/${campaignHash}`);
+  return egoiGet(`/reports/email/${campaignHash}`, { url: true });
 }

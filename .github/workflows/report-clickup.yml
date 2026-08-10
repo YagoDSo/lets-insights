@@ -1,0 +1,26 @@
+name: Let's Insights — relatório ClickUp
+
+# Roda toda sexta, 3 dias depois do disparo de terça (dá tempo de aberturas
+# e cliques se acumularem). GitHub Actions usa UTC; 12:00 UTC = 09:00 BRT.
+# Também pode ser disparado manualmente pela aba Actions (workflow_dispatch).
+on:
+  schedule:
+    - cron: "0 12 * * 5"
+  workflow_dispatch:
+
+jobs:
+  report-clickup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run report-clickup
+        env:
+          EGOI_API_KEY: ${{ secrets.EGOI_API_KEY }}
+          CLICKUP_API_TOKEN: ${{ secrets.CLICKUP_API_TOKEN }}

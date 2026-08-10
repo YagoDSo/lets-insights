@@ -30,6 +30,11 @@ export const config = {
     { id: Number(process.env.EGOI_LIST_CONDUTORES) || 34, nome: 'Condutores 2023' },
     { id: Number(process.env.EGOI_LIST_BASE_LETS) || 69, nome: "Base de Usuários Let's" },
   ],
+
+  // ClickUp (relatório automático de números do E-goi — ver lib/clickup.js
+  // e report-clickup.js). Exceção pontual: só essa tarefa, só essa tabela.
+  clickupApiToken: process.env.CLICKUP_API_TOKEN,
+  clickupTaskId: process.env.CLICKUP_TASK_ID || '86ahderm5',
 };
 
 // Falha cedo e com mensagem clara se faltar credencial obrigatória.

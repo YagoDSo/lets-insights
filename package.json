@@ -13,6 +13,7 @@
     "wf02": "node src/wf02-curadoria.js",
     "wf03": "node src/wf03-montagem-envio.js",
     "report-egoi": "node src/report-egoi.js",
+    "report-clickup": "node src/report-clickup.js",
     "pipeline": "node src/wf01-coleta.js && node src/wf02-curadoria.js && node src/wf03-montagem-envio.js"
   },
   "dependencies": {
