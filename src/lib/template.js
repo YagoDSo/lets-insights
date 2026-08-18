@@ -40,7 +40,7 @@ const renderItem = (item, isLast, idx, isBlog) => {
       <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
         <tr>
           <td align="center" style="padding-bottom:14px;">
-            <a href="${safeURL(item.url)}" target="_blank" style="text-decoration:none;"><img src="${safeURL(item.imagem)}" alt="${esc(item.categoria || 'Notícia')}" width="536" style="display:block;width:100%;max-width:536px;height:auto;object-fit:cover;border:0;margin:0 auto;" /></a>
+            <a href="${safeURL(item.url)}" target="_blank" style="text-decoration:none;"><img src="${safeURL(item.imagem)}" alt="${esc(item.categoria || 'Notícia')}" width="536" height="300" style="display:block;width:100%;max-width:536px;height:300px;object-fit:cover;border:0;margin:0 auto;" /></a>
           </td>
         </tr>
         <tr>
