@@ -19,6 +19,8 @@ import { chamarClaude } from './lib/claude.js';
 import { repairJSON } from './lib/repair.js';
 import { gerarImagemPorTema } from './lib/imagegen.js';
 import { commitarImagensGeradas } from './lib/gitAssets.js';
+import { verificarIntegridade, resumirMotivos, extrairTextoVisivel } from './lib/integridade.js';
+import { buscarPagina, buscarHTML } from './lib/paginas.js';
 
 const FALLBACK_BLOG_IMG =
   'https://cdn.prod.website-files.com/67d2cd7e700eb793f98a2e81/6a04acd2772388e00bdf5a8d_Gemini_Generated_Image_nmyoe6nmyoe6nmyo.png';
@@ -26,26 +28,6 @@ const FALLBACK_BLOG_IMG =
 const DIACRITICOS = new RegExp('[̀-ͯ]', 'g');
 const removerAcentos = (s) => s.normalize('NFD').replace(DIACRITICOS, '');
 const slugify = (s) => removerAcentos(s || 'geral').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-
-// ─── Buscar HTML (GET, tolerante a falha, timeout 15s) — usado tanto pra
-// artigos coletados (via link normalizado, pode vir com encoding estranho
-// do RSS) quanto pro scraping do blog Lets (URLs sempre nossas, sem esse
-// problema; encodeURI/decodeURI aqui são no-op nesse caso). ─────────────
-async function buscarHTML(url) {
-  try {
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 15000);
-    const resp = await fetch(encodeURI(decodeURIComponent(url)), {
-      redirect: 'follow',
-      signal: controller.signal,
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LetsInsights-Bot/1.0; +https://www.lets.com.br)' },
-    });
-    clearTimeout(t);
-    return await resp.text();
-  } catch {
-    return '';
-  }
-}
 
 // ─── Extrair Imagem (og:image → twitter:image → image_src) ───
 function extrairImagem(html) {
@@ -143,34 +125,12 @@ function extrairDescricaoPost(htmlPost) {
   return m ? m[1].trim() : null;
 }
 
-// ─── Blog Lets: texto completo do artigo (corpo da página, sem nav/
-// footer/script/style), pra IA extrair números e detalhes específicos
-// em vez de só reescrever a meta description (curta, genérica, escrita
-// pra SEO). Corta em 6000 caracteres — sobra pra qualquer post do blog,
-// evita gastar tokens à toa se a página vier maior que o esperado. ────
-function extrairTextoArtigo(htmlPost) {
-  if (!htmlPost || htmlPost.length < 500) return null;
-  let corpo = htmlPost;
-  const bodyMatch = corpo.match(/<body[^>]*>([\s\S]*)<\/body>/i);
-  if (bodyMatch) corpo = bodyMatch[1];
-  corpo = corpo
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
-    .replace(/<header[\s\S]*?<\/header>/gi, ' ')
-    .replace(/<footer[\s\S]*?<\/footer>/gi, ' ');
-  let texto = corpo
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (texto.length < 100) return null; // extração falhou (página estranha/vazia)
-  if (texto.length > 6000) texto = texto.slice(0, 6000) + '...';
-  return texto;
-}
+// ─── Blog Lets: texto completo do artigo ──────────────────────
+// A limpeza de HTML vive em lib/integridade.js (mesma função que as
+// verificações de integridade usam pra ler o corpo das páginas dos
+// artigos). Corta em 6000 caracteres — sobra pra qualquer post do blog,
+// evita gastar tokens à toa se a página vier maior que o esperado.
+const extrairTextoArtigo = (htmlPost) => extrairTextoVisivel(htmlPost, 6000);
 
 // ─── Validar URLs Vivas (HEAD, timeout 5s) ───────────────────
 // Retenta uma vez em status tipicamente transitório (rate-limit/anti-bot do
@@ -313,10 +273,10 @@ Retorne APENAS JSON válido (sem markdown):
 
 ARTIGOS (ordenados por score):
 ${JSON.stringify(
-  // score/justificativa/posicao são metadado interno da curadoria — a redação
-  // não usa nenhum dos três (não estão no formato de saída pedido acima) e
-  // são só tokens de input desperdiçados nesta chamada.
-  selecionados.map(({ score, justificativa, posicao, ...resto }) => resto),
+  // score/justificativa/posicao/integridade são metadado interno da curadoria
+  // e da verificação — a redação não usa nenhum deles (não estão no formato de
+  // saída pedido acima) e são só tokens de input desperdiçados nesta chamada.
+  selecionados.map(({ score, justificativa, posicao, integridade, ...resto }) => resto),
   null,
   2,
 )}`;
@@ -382,6 +342,10 @@ async function completarSelecionados(selecionados, validados, mapaResumos) {
       url: cand.url,
       fonte: cand.fonte,
       imagem: cand.imagem,
+      // Sem isto, um artigo completado por aqui chegaria ao banco sem o
+      // título do feed e a reconferência do WF-03 perderia a comparação
+      // de título justamente nele.
+      titulo_original: cand.titulo_original,
     });
     usados.add(cand.url);
     temasUsados.add(cand.tema);
@@ -419,6 +383,11 @@ async function main() {
     resumo: r.resumo,
     tema: r.tema || 'Outros',
   }));
+  // Título e resumo como o feed RSS publicou: é contra isso que a
+  // verificação de integridade compara o conteúdo real da página.
+  const mapaRss = {};
+  artigos.forEach((a) => (mapaRss[a.url] = { titulo: a.titulo, resumo: a.resumo }));
+
   const textoCuradoria = await chamarClaude(promptCuradoria(artigos), { maxTokens: 3000 });
   let dadosCuradoria;
   try {
@@ -446,15 +415,32 @@ async function main() {
   const selecionadosCuradoria = semExcessoDeFonte.map((art, idx) => ({ ...art, posicao: idx }));
   console.log(`Curadoria: ${selecionadosCuradoria.length} artigos selecionados`);
 
-  // "Buscar HTML do Artigo" + "Extrair Imagem"
+  // "Buscar HTML do Artigo" + "Extrair Imagem" + "Verificar Integridade"
+  // A verificação de integridade roda sobre o MESMO HTML que já era
+  // baixado aqui pra extrair a imagem (e antes descartado logo em
+  // seguida): nenhuma requisição a mais, nenhum token de API.
   const comImagem = [];
+  const diagnostico = [];
   for (let idx = 0; idx < selecionadosCuradoria.length; idx++) {
     const original = selecionadosCuradoria[idx];
     const tipo = idx < 3 ? 'REAL' : 'BACKUP';
-    const html = await buscarHTML(original.url);
+    const { html, urlFinal } = await buscarPagina(original.url);
     const imagem = extrairImagem(html);
-    console.log(`[${idx}] ${tipo}: ${original.titulo_original} (${original.fonte}) ${imagem ? '✓ img' : '✗ sem img'}`);
+    const rss = mapaRss[original.url] || {};
+    const integridade = verificarIntegridade({
+      url: original.url,
+      urlFinal,
+      html,
+      tituloRss: rss.titulo || original.titulo_original,
+      resumoRss: rss.resumo || '',
+      imagem,
+    });
+    if (integridade.motivos.length > 0) {
+      console.log(`      ↳ integridade: ${resumirMotivos(integridade.motivos)}`);
+    }
+    console.log(`[${idx}] ${tipo}: ${original.titulo_original} (${original.fonte}) ${imagem ? '✓ img' : '✗ sem img'} ${integridade.ok ? '' : '✗ INTEGRIDADE'}`);
     comImagem.push({
+      integridade,
       titulo_original: original.titulo_original,
       url: original.url,
       fonte: original.fonte,
@@ -468,16 +454,50 @@ async function main() {
     });
   }
 
-  // "Validar URLs Vivas"
+  // "Validar URLs Vivas" + quarentena por integridade.
+  // Reprovar aqui NUNCA dispara nova chamada de curadoria/redação: o
+  // artigo simplesmente sai da lista e o próximo backup ocupa o lugar.
   console.log(`\nValidando ${comImagem.length} artigos...`);
   const validados = [];
   let descartados = 0;
   let imagensDescartadas = 0;
   for (let idx = 0; idx < comImagem.length; idx++) {
     const artigo = comImagem[idx];
+    if (!artigo.integridade.ok) {
+      console.log(`  [${idx}] ✗ DESCARTADO por integridade: ${resumirMotivos(artigo.integridade.motivos)}`);
+      diagnostico.push({
+        etapa: 'wf02',
+        acao: 'descartado',
+        url: artigo.url,
+        fonte: artigo.fonte,
+        titulo: artigo.titulo_original,
+        motivos: artigo.integridade.motivos,
+      });
+      descartados++;
+      continue;
+    }
+    if (artigo.integridade.motivos.length > 0) {
+      // Passou, mas com ressalva: não descarta, só reporta no preview.
+      diagnostico.push({
+        etapa: 'wf02',
+        acao: 'ressalva',
+        url: artigo.url,
+        fonte: artigo.fonte,
+        titulo: artigo.titulo_original,
+        motivos: artigo.integridade.motivos,
+      });
+    }
     const vURL = await validarURL(artigo.url);
     if (deveDescartar(vURL)) {
       console.log(`  [${idx}] ✗ DESCARTADO: HTTP ${vURL.status}`);
+      diagnostico.push({
+        etapa: 'wf02',
+        acao: 'descartado',
+        url: artigo.url,
+        fonte: artigo.fonte,
+        titulo: artigo.titulo_original,
+        motivos: [{ codigo: 'http_invalido', peso: 'grave', detalhe: `HTTP ${vURL.status}` }],
+      });
       descartados++;
       continue;
     }
@@ -520,8 +540,12 @@ async function main() {
   }
 
   // "Gerar Imagem Fallback (IA)": artigos sem imagem válida entre os 3
-  // "reais" (posições 0-2; 3 e 4 são backup e nunca entram na edição).
-  const semImagem = validados.filter((a) => !a.imagem && a.posicao < 3);
+  // primeiros da lista que sobrou (os candidatos reais; o resto é backup e
+  // raramente entra na edição). Usa a posição NA LISTA VALIDADA, não o
+  // índice original da curadoria: com descarte por integridade ou link
+  // morto, um backup promovido vira candidato real e também precisa de
+  // imagem.
+  const semImagem = validados.slice(0, 3).filter((a) => !a.imagem);
   if (semImagem.length > 0) {
     console.log(`\nGerando ${semImagem.length} imagem(ns) via IA (Gemini) para artigos sem imagem...`);
     const arquivos = [];
@@ -563,18 +587,23 @@ async function main() {
   }
 
   // Integridade de URL: corrige URL/fonte/imagem caso a IA tenha inventado.
+  // titulo_original (como o feed publicou) viaja junto até o banco: é o que
+  // o WF-03 usa pra reconferir, na hora do envio, se a página continua
+  // sendo a mesma notícia. O template ignora esse campo.
   const mapaOriginal = {};
-  validados.forEach((s) => (mapaOriginal[s.url] = { url: s.url, fonte: s.fonte, imagem: s.imagem }));
+  validados.forEach(
+    (s) => (mapaOriginal[s.url] = { url: s.url, fonte: s.fonte, imagem: s.imagem, titulo_original: s.titulo_original }),
+  );
   const validarArtigo = (artIA, posEsperada) => {
     const urlIA = artIA.url || '';
     if (mapaOriginal[urlIA]) {
       const o = mapaOriginal[urlIA];
-      return { ...artIA, url: o.url, fonte: o.fonte, imagem: o.imagem };
+      return { ...artIA, url: o.url, fonte: o.fonte, imagem: o.imagem, titulo_original: o.titulo_original };
     }
     if (validados[posEsperada]) {
       const o = validados[posEsperada];
       console.log(`⚠️ URL corrigida (pos ${posEsperada}): IA inventou, usando original`);
-      return { ...artIA, url: o.url, fonte: o.fonte, imagem: o.imagem };
+      return { ...artIA, url: o.url, fonte: o.fonte, imagem: o.imagem, titulo_original: o.titulo_original };
     }
     return artIA;
   };
@@ -607,6 +636,7 @@ async function main() {
     json_artigos_cards: JSON.stringify([]),
     json_blog: JSON.stringify(blogFinal),
     json_cta: JSON.stringify(edicao.cta_final),
+    json_diagnostico: JSON.stringify(diagnostico),
     status: 'pronto_envio_com_imagens',
     gerado_em: new Date().toISOString(),
   };
