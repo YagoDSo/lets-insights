@@ -61,6 +61,37 @@ const renderItem = (item, isLast, idx, isBlog) => {
   `;
 };
 
+// ─────────────────────────────────────────────────────────────
+// Assunto do e-mail = manchete da edição + sufixo de marca.
+//
+// set/2026: antes o formato era "Let's Insights · [destaque]", com a marca
+// NA FRENTE. Medição nas 15 edições enviadas: o prefixo come 17 dos ~33
+// caracteres que o Gmail Android mostra (52%), e nenhuma das 15 chegou
+// inteira ao leitor de celular — todas cortavam no meio da palavra. A marca
+// já aparece no nome do remetente, que é campo próprio em toda caixa de
+// entrada, então repeti-la na frente era pagar duas vezes pela mesma
+// informação e gastar a metade mais valiosa da vitrine com o elemento que
+// menos converte.
+//
+// Agora a manchete vem primeiro e a marca fica no fim, onde é truncada no
+// mobile de propósito e aparece no desktop. O sufixo é montado AQUI, em
+// código, e não pedido à IA: garante consistência e deixa a IA com um
+// trabalho só (escrever a manchete).
+// ─────────────────────────────────────────────────────────────
+export const SUFIXO_ASSUNTO = " « Let's Insights";
+
+const PREFIXO_ANTIGO = /^\s*Let['\u2019]?s\s+Insights\s*[·\-–—:]\s*/i;
+const SUFIXO_JA_POSTO = /\s*[«<]{1,2}\s*Let['\u2019]?s\s+Insights\s*$/i;
+
+export function montarAssunto(tituloEdicao) {
+  let t = String(tituloEdicao ?? '').trim();
+  // Defensivo: a IA pode reincidir no formato antigo ou já devolver o
+  // sufixo. Normaliza os dois casos em vez de deixar sair assunto duplicado.
+  t = t.replace(PREFIXO_ANTIGO, '').replace(SUFIXO_JA_POSTO, '').trim();
+  if (!t) return "Let's Insights";
+  return t + SUFIXO_ASSUNTO;
+}
+
 export function montarHTML(dados, opts = {}) {
   let selecionados, cta, blog;
   try { selecionados = JSON.parse(dados.json_artigos_principais); } catch (e) { throw new Error('Falha parsear json_artigos_principais: ' + e.message); }
@@ -284,7 +315,7 @@ export function montarHTML(dados, opts = {}) {
   // reescrita da IA, então não dá pra confiar que nunca vem com \r\n.
   const semQuebraDeLinha = (s) => String(s ?? '').replace(/[\r\n]+/g, ' ').trim();
 
-  const assunto = dados.titulo_edicao;
+  const assunto = montarAssunto(dados.titulo_edicao);
 
   return {
     edicao: dados.edicao,
