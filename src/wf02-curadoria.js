@@ -287,10 +287,15 @@ Texto completo do artigo: ${blogRaw?.textoCompleto || blogRaw?.descricao || '(se
 
 Gere também:
 
-1. TÍTULO DA EDIÇÃO no formato OBRIGATÓRIO: "Let's Insights · [destaque]"
-   - Destaque: máx 40 caracteres, verbo de ação ou novidade concreta
-   - NUNCA omita o prefixo "Let's Insights · "
-   - Use "·" (ponto médio U+00B7), nunca hífen
+1. TÍTULO DA EDIÇÃO: uma manchete única, sobre o destaque mais forte desta edição
+   - Máx 45 caracteres (o ponto ideal fica entre 30 e 42)
+   - Se der pra fechar o sentido em até 33 caracteres, melhor ainda: é o que cabe INTEIRO no Gmail do Android. Não force, porém, a ponto de virar genérico — fato concreto em 40 chars vale mais que vaguidade em 30
+   - NUNCA escreva "Let's Insights" em lugar nenhum do título: o sufixo da marca é acrescentado depois, em código
+   - Comece pelo FATO CONCRETO (sujeito + verbo de ação). O Gmail no celular mostra só os ~33 primeiros caracteres, então preâmbulo, rótulo de categoria ou contexto antes do fato desperdiçam a parte que o leitor realmente vê
+   - Prefira âncora concreta a termo genérico: número, sigla, nome próprio ou percentual quando existir ("Lei 15.485", "BR-040", "biodiesel a 15%") ganham de "regulação" ou "combustível"
+   - Sem travessão, sem dois-pontos de rótulo ("Regulação: ..."), sem ponto final, sem aspas
+   - Formato certo: "Lei 15.485 aperta cadastro de motorista" / "Pesagem em movimento chega à BR-040" / "Biodiesel a 15% derruba desempenho"
+   - Formato errado: "Let's Insights · Biodiesel e compliance" (marca na frente) / "Regulação e custos" (genérico, sem fato) / "Novidades do setor de frotas" (vazio)
 
 2. PRÉ-HEADER (máx 90 caracteres, vira preview no inbox)
 
@@ -613,6 +618,13 @@ async function main() {
   const obrigatorios = ['titulo_edicao', 'pre_header', 'artigos_selecionados', 'blog', 'cta_final'];
   const faltando = obrigatorios.filter((c) => !edicao[c]);
   if (faltando.length > 0) throw new Error(`Campos faltando: ${faltando.join(', ')}`);
+
+  // O assunto real é montarAssunto(titulo_edicao) + sufixo da marca (17
+  // chars, ver lib/template.js). Não trunca aqui: corte automático quebraria
+  // no meio da palavra. Só avisa, pra dar pra calibrar o prompt com o tempo.
+  if (edicao.titulo_edicao && edicao.titulo_edicao.length > 45) {
+    console.log(`⚠️ Título com ${edicao.titulo_edicao.length} chars (alvo: até 45). O Gmail no celular corta em ~33.`);
+  }
   if (!Array.isArray(edicao.artigos_selecionados) || edicao.artigos_selecionados.length === 0) {
     throw new Error('artigos_selecionados inválido ou vazio');
   }
