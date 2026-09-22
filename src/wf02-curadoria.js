@@ -19,6 +19,7 @@ import { chamarClaude } from './lib/claude.js';
 import { repairJSON } from './lib/repair.js';
 import { gerarImagemPorTema } from './lib/imagegen.js';
 import { commitarImagensGeradas } from './lib/gitAssets.js';
+import { precisaRehospedar, baixarImagem } from './lib/rehost.js';
 
 const FALLBACK_BLOG_IMG =
   'https://cdn.prod.website-files.com/67d2cd7e700eb793f98a2e81/6a04acd2772388e00bdf5a8d_Gemini_Generated_Image_nmyoe6nmyoe6nmyo.png';
@@ -519,12 +520,20 @@ async function main() {
     console.log('⚠️ Não foi possível extrair post do blog. Usando fallback genérico.');
   }
 
-  // "Gerar Imagem Fallback (IA)": artigos sem imagem válida entre os 3
+  // ─── Imagens que precisam sair pro nosso domínio ───
+  // Dois casos distintos, mesmo destino (public/generated/, servido por
+  // raw.githubusercontent.com) e um único commit:
+  //   (a) artigo sem imagem válida → gera via Gemini
+  //   (b) imagem em CDN compartilhado → baixa e re-hospeda (ver lib/rehost.js)
+  // O nome do arquivo carrega o número da edição de propósito: e-mail já
+  // enviado aponta pra essa URL pra sempre, então nome não pode ser reusado.
+  const arquivos = [];
+
+  // (a) "Gerar Imagem Fallback (IA)": artigos sem imagem válida entre os 3
   // "reais" (posições 0-2; 3 e 4 são backup e nunca entram na edição).
   const semImagem = validados.filter((a) => !a.imagem && a.posicao < 3);
   if (semImagem.length > 0) {
     console.log(`\nGerando ${semImagem.length} imagem(ns) via IA (Gemini) para artigos sem imagem...`);
-    const arquivos = [];
     for (const artigo of semImagem) {
       const { buffer, ext } = await gerarImagemPorTema({
         titulo: artigo.titulo_original,
@@ -534,14 +543,60 @@ async function main() {
       arquivos.push({
         nomeArquivo: `ed${edicaoAtual}-pos${artigo.posicao}-${slugify(artigo.tema)}.${ext}`,
         buffer,
-        posicao: artigo.posicao,
+        aplicar: (url) => { artigo.imagem = url; },
+        rotulo: `[${artigo.posicao}] imagem gerada`,
       });
     }
-    const urls = commitarImagensGeradas(arquivos);
-    for (const { nomeArquivo, posicao } of arquivos) {
-      const alvo = validados.find((a) => a.posicao === posicao);
-      alvo.imagem = urls[nomeArquivo];
-      console.log(`  [${posicao}] imagem gerada: ${urls[nomeArquivo]}`);
+  }
+
+  // (b) Re-hospedagem: cobre tanto os 3 artigos da edição quanto o destaque
+  // do blog. O blog é o caso comum, porque lets.com.br/blog roda em Webflow
+  // e tanto a og:image do post quanto o FALLBACK_BLOG_IMG saem do CDN deles.
+  // Holder da imagem do blog: resolve o fallback ANTES da re-hospedagem,
+  // senão o caminho "scraping do blog falhou" escaparia com a URL do Webflow
+  // do FALLBACK_BLOG_IMG intacta.
+  const blogImg = { imagem: blogRaw?.imagem || FALLBACK_BLOG_IMG };
+
+  const candidatosRehost = [
+    ...validados
+      .filter((a) => a.posicao < 3 && precisaRehospedar(a.imagem))
+      .map((a) => ({ alvo: a, nome: `ed${edicaoAtual}-pos${a.posicao}-rehost`, rotulo: `[${a.posicao}] artigo` })),
+    ...(precisaRehospedar(blogImg.imagem)
+      ? [{ alvo: blogImg, nome: `ed${edicaoAtual}-blog`, rotulo: '[blog] destaque' }]
+      : []),
+  ];
+  if (candidatosRehost.length > 0) {
+    console.log(`\nRe-hospedando ${candidatosRehost.length} imagem(ns) de CDN compartilhado...`);
+    for (const { alvo, nome, rotulo } of candidatosRehost) {
+      const origem = alvo.imagem;
+      try {
+        const { buffer, ext } = await baixarImagem(origem);
+        arquivos.push({
+          nomeArquivo: `${nome}.${ext}`,
+          buffer,
+          aplicar: (url) => {
+            alvo.imagem = url;
+            // blogRaw vai no prompt da redação; mantém os dois consistentes.
+            if (alvo === blogImg && blogRaw) blogRaw.imagem = url;
+          },
+          rotulo: `${rotulo} re-hospedado`,
+        });
+      } catch (e) {
+        // Degrada pro comportamento antigo: mantém a URL original. Score de
+        // spam pior é melhor do que edição sem imagem.
+        console.log(`  ⚠️ ${rotulo}: falha ao baixar (${e.message}). Mantendo URL original.`);
+      }
+    }
+  }
+
+  if (arquivos.length > 0) {
+    const urls = commitarImagensGeradas(
+      arquivos,
+      `chore: imagens da edição ${edicaoAtual} (${arquivos.length} arquivo(s))`,
+    );
+    for (const { nomeArquivo, aplicar, rotulo } of arquivos) {
+      aplicar(urls[nomeArquivo]);
+      console.log(`  ${rotulo}: ${urls[nomeArquivo]}`);
     }
   }
 
@@ -590,7 +645,7 @@ async function main() {
     titulo: edicao.blog.titulo,
     url: blogRaw?.url || 'https://www.lets.com.br/blog',
     fonte: 'Blog Lets',
-    imagem: blogRaw?.imagem || FALLBACK_BLOG_IMG,
+    imagem: blogImg.imagem,
   };
 
   console.log(`✓ Edição ${edicaoAtual} gerada: "${edicao.titulo_edicao}"`);
