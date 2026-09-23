@@ -13,6 +13,75 @@ import { lerAba, upsertLinhas, commitarBanco } from './lib/db.js';
 import { montarHTML } from './lib/template.js';
 import { enviarPreview } from './lib/sender.js';
 import { criarRascunho } from './lib/egoi-campaign.js';
+import { buscarPagina } from './lib/paginas.js';
+import { verificarIntegridade, resumirMotivos } from './lib/integridade.js';
+import { blocoDiagnosticoHTML } from './lib/diagnostico.js';
+
+// ─── Reconferência na hora do envio ──────────────────────────
+// O WF-02 já verificou a integridade de cada link, mas o disparo real é
+// manual e costuma sair dias depois: a edição 16 ficou em rascunho de
+// 15/09 em diante. Uma página pode ser sequestrada nessa janela, então
+// os links são reconferidos aqui, imediatamente antes de montar o HTML.
+// Custo: 4 requisições HTTP, nenhum token de API.
+async function revalidarLinks(itens) {
+  const problemas = [];
+  for (const item of itens) {
+    if (!item.url) continue;
+    const { html, urlFinal, status } = await buscarPagina(item.url);
+    if (status >= 400) {
+      problemas.push({
+        etapa: 'wf03 (reconferência)',
+        acao: 'bloqueio',
+        url: item.url,
+        fonte: item.fonte,
+        titulo: item.titulo,
+        motivos: [{ codigo: 'http_invalido', peso: 'grave', detalhe: `HTTP ${status}` }],
+      });
+      continue;
+    }
+    if (status === 0) {
+      console.log(`  ~ ${item.url}: sem resposta (rede). Mantido, mesmo critério do WF-02.`);
+      continue;
+    }
+    // titulo_original é o título como o feed publicou, gravado pelo WF-02.
+    // Sem ele (edições anteriores a set/2026), a comparação de título fica
+    // de fora e sobram spam/idioma/redirect, que já são as mais fortes.
+    // A imagem fica de fora: a que está gravada já passou pela validação do
+    // WF-02 e pode ser legitimamente de outro host (as geradas por IA ficam
+    // em raw.githubusercontent.com), então compará-la com o host do artigo
+    // aqui só produziria ruído, sem dizer nada novo sobre sequestro.
+    const r = verificarIntegridade({
+      url: item.url,
+      urlFinal,
+      html,
+      tituloRss: item.titulo_original || '',
+      resumoRss: '',
+    });
+    const graves = r.motivos.filter((m) => m.peso === 'grave');
+    if (graves.length > 0) {
+      problemas.push({
+        etapa: 'wf03 (reconferência)',
+        acao: 'bloqueio',
+        url: item.url,
+        fonte: item.fonte,
+        titulo: item.titulo,
+        motivos: graves,
+      });
+    } else if (r.motivos.length > 0) {
+      console.log(`  ~ ${item.url}: ${resumirMotivos(r.motivos)}`);
+    }
+  }
+  return problemas;
+}
+
+const parseJSON = (valor, padrao) => {
+  try {
+    const v = JSON.parse(valor);
+    return v == null ? padrao : v;
+  } catch {
+    return padrao;
+  }
+};
 
 // ─── Orquestração ────────────────────────────────────────────
 async function main() {
@@ -31,6 +100,20 @@ async function main() {
   const selected = prontas.sort((a, b) => String(b.edicao).localeCompare(String(a.edicao)))[0];
   console.log(`Edição selecionada: ${selected.edicao} - ${selected.titulo_edicao}`);
 
+  // Reconferência dos 4 links (blog + 3 artigos) antes de montar o HTML.
+  const artigosEdicao = parseJSON(selected.json_artigos_principais, []);
+  const blogEdicao = parseJSON(selected.json_blog, null);
+  const itensParaConferir = [...(blogEdicao ? [blogEdicao] : []), ...artigosEdicao];
+  console.log(`\nReconferindo ${itensParaConferir.length} link(s) antes do envio...`);
+  const problemas = await revalidarLinks(itensParaConferir);
+  const bloqueado = problemas.length > 0;
+  if (bloqueado) {
+    console.error(`✗ ${problemas.length} link(s) reprovado(s) na reconferência:`);
+    problemas.forEach((p) => console.error(`  - ${p.url}: ${resumirMotivos(p.motivos)}`));
+  } else {
+    console.log('✓ Todos os links seguem apontando para o conteúdo esperado.');
+  }
+
   // "Montar HTML1" — teste A/B de posição do CTA: gera as 3 variantes
   // (início/meio/fim), todas com o mesmo texto de CTA (json_cta), só
   // mudando posição/estilo do botão. "fim" é o comportamento de produção
@@ -47,13 +130,30 @@ async function main() {
     filename: `lets_insights_${selected.edicao}_cta_${v.ctaPosicao}.html`,
     content: Buffer.from(v.montado.html_final, 'utf-8'),
   }));
+  // O bloco de diagnóstico entra só no CORPO do preview (e-mail interno).
+  // Os anexos e o HTML que vira rascunho no E-goi seguem sem ele.
+  const diagnosticoWf02 = parseJSON(selected.json_diagnostico, []);
+  const corpoPreview =
+    blocoDiagnosticoHTML([...problemas, ...diagnosticoWf02], { bloqueado }) + principal.html_final;
+
   const messageId = await enviarPreview({
-    assunto: principal.assunto_preview,
-    html: principal.html_final,
+    assunto: `${bloqueado ? '[BLOQUEADO] ' : ''}${principal.assunto_preview}`,
+    html: corpoPreview,
     anexos,
     para: config.previewTo,
   });
   console.log(`✓ Preview enviado para ${config.previewTo} (messageId: ${messageId}) — 3 variantes de CTA em anexo`);
+
+  // Reprovou na reconferência: o preview sai (com o alerta no topo) pra
+  // você ver o que houve, mas nada mais acontece — sem rascunho no E-goi,
+  // sem mudar o status. Assim, depois de corrigir o link no banco ou de o
+  // site voltar ao normal, basta rodar o WF-03 de novo: a edição continua
+  // como 'pronto_envio_com_imagens' e é selecionada normalmente.
+  if (bloqueado) {
+    throw new Error(
+      `Reconferência reprovou ${problemas.length} link(s). Rascunhos do E-goi não criados e status preservado. Veja o preview enviado para ${config.previewTo}.`,
+    );
+  }
 
   // Rascunhos "POR PUBLICAR" no E-goi, um por lista, pra revisão manual
   // antes do envio real. Só CRIA (status "draft") — nunca dispara

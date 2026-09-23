@@ -59,6 +59,13 @@ function conectar() {
   if (!colunasEdicoes.includes('json_assunto_manchetes')) {
     _db.exec(`ALTER TABLE ${config.abaEdicoes} ADD COLUMN json_assunto_manchetes TEXT`);
   }
+  // Migração aditiva (set/2026): diagnóstico das verificações de
+  // integridade de conteúdo (ver src/lib/integridade.js). Guarda o que foi
+  // descartado ou passou com ressalva, pro bloco de diagnóstico do e-mail
+  // de preview — sem isso um descarte só apareceria no log do Actions.
+  if (!colunasEdicoes.includes('json_diagnostico')) {
+    _db.exec(`ALTER TABLE ${config.abaEdicoes} ADD COLUMN json_diagnostico TEXT`);
+  }
 
   return _db;
 }
