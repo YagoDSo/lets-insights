@@ -12,7 +12,9 @@ const BRANCH = 'main';
 const DIR = 'public/generated';
 
 // arquivos: [{ nomeArquivo, buffer }] → retorna { nomeArquivo: urlPublica }
-export function commitarImagensGeradas(arquivos) {
+// Campos extras em cada item sao ignorados, entao quem chama pode carregar
+// metadado proprio junto (ver wf02-curadoria.js).
+export function commitarImagensGeradas(arquivos, mensagem) {
   if (!arquivos.length) return {};
 
   const dirAbs = path.join(process.cwd(), DIR);
@@ -27,7 +29,7 @@ export function commitarImagensGeradas(arquivos) {
   git(['config', 'user.name', 'Lets Insights Bot']);
   git(['config', 'user.email', 'bot@lets.com.br']);
   git(['add', ...arquivos.map((a) => `${DIR}/${a.nomeArquivo}`)]);
-  git(['commit', '-m', `chore: imagem gerada por IA (fallback) — ${arquivos.length} arquivo(s)`]);
+  git(['commit', '-m', mensagem || `chore: imagem gerada por IA (fallback) — ${arquivos.length} arquivo(s)`]);
   git(['push']);
 
   return urls;
