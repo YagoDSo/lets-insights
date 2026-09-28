@@ -287,15 +287,31 @@ Texto completo do artigo: ${blogRaw?.textoCompleto || blogRaw?.descricao || '(se
 
 Gere também:
 
-1. TÍTULO DA EDIÇÃO: uma manchete única, sobre o destaque mais forte desta edição
+1. TÍTULO DA EDIÇÃO: uma manchete única, sobre o destaque mais forte desta edição. Escolha UMA das estruturas abaixo (A, B, ou a pergunta ancorada opcional) — a que render o gancho mais forte pro fato desta edição especificamente, não sempre a mesma:
+
+   ESTRUTURA A — Afirmativa (padrão, use quando não houver uma reviravolta clara)
    - Máx 45 caracteres (o ponto ideal fica entre 30 e 42)
    - Se der pra fechar o sentido em até 33 caracteres, melhor ainda: é o que cabe INTEIRO no Gmail do Android. Não force, porém, a ponto de virar genérico — fato concreto em 40 chars vale mais que vaguidade em 30
-   - NUNCA escreva "Let's Insights" em lugar nenhum do título: o sufixo da marca é acrescentado depois, em código
    - Comece pelo FATO CONCRETO (sujeito + verbo de ação). O Gmail no celular mostra só os ~33 primeiros caracteres, então preâmbulo, rótulo de categoria ou contexto antes do fato desperdiçam a parte que o leitor realmente vê
-   - Prefira âncora concreta a termo genérico: número, sigla, nome próprio ou percentual quando existir ("Lei 15.485", "BR-040", "biodiesel a 15%") ganham de "regulação" ou "combustível"
-   - Sem travessão, sem dois-pontos de rótulo ("Regulação: ..."), sem ponto final, sem aspas
    - Formato certo: "Lei 15.485 aperta cadastro de motorista" / "Pesagem em movimento chega à BR-040" / "Biodiesel a 15% derruba desempenho"
+
+   ESTRUTURA B — Contraste (duas orações curtas: afirma, depois vira a mesa)
+   - Use só quando os artigos selecionados sustentarem uma tensão real (ex: um fato positivo com um "mas" concreto, ou uma solução com uma lacuna) — nunca force um contraste que o conteúdo não tem
+   - Máx 65 caracteres no total, cada oração curta (a segunda pode ser só 2-4 palavras)
+   - Formato certo: "Biodiesel a 15% já é lei. Poucas frotas estão prontas" / "Fiscalização de RAC2 aumentou. Renovação ainda demora"
+
+   Independente da estrutura escolhida, valem SEMPRE estas regras:
+   - NUNCA escreva "Let's Insights" em lugar nenhum do título: o sufixo da marca é acrescentado depois, em código
+   - Prefira âncora concreta a termo genérico: número, sigla, nome próprio ou percentual quando existir ("Lei 15.485", "BR-040", "biodiesel a 15%") ganham de "regulação" ou "combustível". Quando houver um número ou percentual forte disponível, ele deve ser o CENTRO da frase (o que o leitor lembra depois), não um detalhe posto de lado
+   - Sem travessão, sem dois-pontos de rótulo ("Regulação: ..."), sem ponto final, sem aspas
    - Formato errado: "Let's Insights · Biodiesel e compliance" (marca na frente) / "Regulação e custos" (genérico, sem fato) / "Novidades do setor de frotas" (vazio)
+
+   OPCIONAL — pergunta ancorada ("por quê"), em vez de afirmação direta:
+   - Só use se a pergunta for sobre um fato ESPECÍFICO desta edição, nunca genérica ("Por que isso muda tudo?" é proibido — não diz nada que não sirva pra qualquer edição)
+   - A resposta tem que vir de fato no corpo do e-mail (a manchete não pode prometer um "porquê" que o texto não desenvolve)
+   - Mesmo limite de caracteres da Estrutura A
+   - Formato certo: "Por que a Lei 15.485 aperta prazo de motorista" / "Por que biodiesel a 15% derruba desempenho"
+   - Formato errado: "Por que isso é importante?" / "Por que você precisa saber disso?" (suspense vazio, sem âncora)
 
 2. PRÉ-HEADER (máx 90 caracteres, vira preview no inbox)
 
@@ -622,8 +638,8 @@ async function main() {
   // O assunto real é montarAssunto(titulo_edicao) + sufixo da marca (17
   // chars, ver lib/template.js). Não trunca aqui: corte automático quebraria
   // no meio da palavra. Só avisa, pra dar pra calibrar o prompt com o tempo.
-  if (edicao.titulo_edicao && edicao.titulo_edicao.length > 45) {
-    console.log(`⚠️ Título com ${edicao.titulo_edicao.length} chars (alvo: até 45). O Gmail no celular corta em ~33.`);
+  if (edicao.titulo_edicao && edicao.titulo_edicao.length > 65) {
+    console.log(`⚠️ Título com ${edicao.titulo_edicao.length} chars (alvo: até 45 na estrutura afirmativa/pergunta, até 65 na de contraste). O Gmail no celular corta em ~33.`);
   }
   if (!Array.isArray(edicao.artigos_selecionados) || edicao.artigos_selecionados.length === 0) {
     throw new Error('artigos_selecionados inválido ou vazio');
