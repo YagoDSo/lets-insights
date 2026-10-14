@@ -1,11 +1,9 @@
 name: Let's Insights — relatório ClickUp
 
-# Roda toda sexta, 3 dias depois do disparo de terça (dá tempo de aberturas
-# e cliques se acumularem). GitHub Actions usa UTC; 12:00 UTC = 09:00 BRT.
-# Também pode ser disparado manualmente pela aba Actions (workflow_dispatch).
+# Agendamento desligado em 2026-10-14: o Yago deixou de usar este relatório.
+# Antes rodava toda sexta (cron "0 12 * * 5" = 09:00 BRT). O arquivo fica
+# no repositório e ainda pode ser disparado manualmente pela aba Actions.
 on:
-  schedule:
-    - cron: "0 12 * * 5"
   workflow_dispatch:
 
 jobs:
