@@ -26,6 +26,25 @@ const safeURL = (url) => {
   return /^https?:\/\//i.test(s) ? esc(s) : '#';
 };
 
+// UTM única pra todo link da newsletter (out/2026): antes o botão CTA e o
+// rodapé usavam utm_source=egoi&utm_campaign=newsletter e viravam outra
+// campanha no GA4. Só utm_content muda por link. Usa URL pra respeitar
+// query string que a URL de origem já tenha (concatenar "?utm=" quebrava).
+const comUtm = (url, utmContent) => {
+  try {
+    const u = new URL(String(url ?? '').trim());
+    u.searchParams.set('utm_source', 'newsletter');
+    u.searchParams.set('utm_medium', 'email');
+    u.searchParams.set('utm_campaign', 'insights');
+    u.searchParams.set('utm_content', utmContent);
+    return u.toString();
+  } catch {
+    return url;
+  }
+};
+const UTM_FIXA = 'utm_source=newsletter&amp;utm_medium=email&amp;utm_campaign=insights&amp;utm_content=';
+const CTA_URL = `https://www.lets.com.br/solicitar-proposta?${UTM_FIXA}botao_cta`;
+
 // Um item da lista (blog ou artigo), no formato editorial do Brazil Journal:
 // imagem cheia no topo, texto centralizado, "Leia mais" como link em negrito
 // embutido na frase (não botão). isLast controla o padding do divisor final;
@@ -40,7 +59,7 @@ const renderItem = (item, isLast, idx, isBlog) => {
       <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
         <tr>
           <td align="center" style="padding-bottom:14px;">
-            <a href="${safeURL(item.url)}" target="_blank" style="text-decoration:none;"><img src="${safeURL(item.imagem)}" alt="${esc(item.categoria || 'Notícia')}" width="536" height="300" style="display:block;width:100%;max-width:536px;height:300px;object-fit:cover;border:0;margin:0 auto;" /></a>
+            <a href="${safeURL(comUtm(item.url, utmContent))}" target="_blank" style="text-decoration:none;"><img src="${safeURL(item.imagem)}" alt="${esc(item.categoria || 'Notícia')}" width="536" height="300" style="display:block;width:100%;max-width:536px;height:300px;object-fit:cover;border:0;margin:0 auto;" /></a>
           </td>
         </tr>
         <tr>
@@ -49,7 +68,7 @@ const renderItem = (item, isLast, idx, isBlog) => {
               ${esc(item.categoria || 'Notícia')}
             </div>
             <p class="dm-text-primary" style="margin:0 0 10px;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:400;font-size:14px;line-height:1.55;color:#12100b;">
-              ${esc(item.titulo)} <a href="${safeURL(item.url)}?utm_source=newsletter&utm_medium=email&utm_campaign=insights&utm_content=${utmContent}" target="_blank" style="color:#f15a22;font-weight:700;text-decoration:none;white-space:nowrap;">&gt;&gt;&gt; ${textoLink}</a>
+              ${esc(item.titulo)} <a href="${safeURL(comUtm(item.url, utmContent))}" target="_blank" style="color:#f15a22;font-weight:700;text-decoration:none;white-space:nowrap;">&gt;&gt;&gt; ${textoLink}</a>
             </p>
             <div style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:11px;color:#a09ca2;">Fonte: ${esc(item.fonte)}</div>
           </td>
@@ -154,10 +173,10 @@ export function montarHTML(dados, opts = {}) {
                 ${esc(ctaConteudo.texto || '')}
               </p>
               <!--[if mso]>
-              <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="https://www.lets.com.br/solicitar-proposta" style="height:${botaoAlturaMso};v-text-anchor:middle;width:${botaoLarguraMso};" arcsize="8%" stroke="f" fillcolor="#f15a22"><w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI, Arial, sans-serif;font-size:${botaoFontSize};font-weight:bold;letter-spacing:1px">FALAR COM ESPECIALISTA</center></v:roundrect>
+              <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${CTA_URL}" style="height:${botaoAlturaMso};v-text-anchor:middle;width:${botaoLarguraMso};" arcsize="8%" stroke="f" fillcolor="#f15a22"><w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI, Arial, sans-serif;font-size:${botaoFontSize};font-weight:bold;letter-spacing:1px">FALAR COM ESPECIALISTA</center></v:roundrect>
               <![endif]-->
               <!--[if !mso]><!-- -->
-              <a href="https://www.lets.com.br/solicitar-proposta?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" target="_blank" style="background-color:#f15a22;color:#ffffff;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:${botaoFontSize};font-weight:700;letter-spacing:0.08em;text-transform:uppercase;text-decoration:none;padding:${botaoPadding};border-radius:3px;display:inline-block;mso-hide:all;">FALAR COM ESPECIALISTA</a>
+              <a href="${CTA_URL}" target="_blank" style="background-color:#f15a22;color:#ffffff;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:${botaoFontSize};font-weight:700;letter-spacing:0.08em;text-transform:uppercase;text-decoration:none;padding:${botaoPadding};border-radius:3px;display:inline-block;mso-hide:all;">FALAR COM ESPECIALISTA</a>
               <!--<![endif]-->
             </td>
           </tr>
@@ -284,10 +303,10 @@ export function montarHTML(dados, opts = {}) {
                         <td align="left">
                           <table role="presentation" border="0" cellpadding="0" cellspacing="0" align="left">
                             <tr>
-                              <td style="padding-right:10px;"><a href="https://www.linkedin.com/company/lets-frotas?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" style="text-decoration:none;"><img src="${ICON_LINKEDIN}" width="26" height="26" alt="LinkedIn" style="display:block;border:0;width:26px;height:26px;"></a></td>
-                              <td style="padding-right:10px;"><a href="https://www.facebook.com/letsfrotas?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" style="text-decoration:none;"><img src="${ICON_FACEBOOK}" width="26" height="26" alt="Facebook" style="display:block;border:0;width:26px;height:26px;"></a></td>
-                              <td style="padding-right:10px;"><a href="https://www.instagram.com/lets.frotas/?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" style="text-decoration:none;"><img src="${ICON_INSTAGRAM}" width="26" height="26" alt="Instagram" style="display:block;border:0;width:26px;height:26px;"></a></td>
-                              <td><a href="https://www.lets.com.br/?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=botao_cta" style="text-decoration:none;"><img src="${ICON_SITE}" width="26" height="26" alt="Site" style="display:block;border:0;width:26px;height:26px;"></a></td>
+                              <td style="padding-right:10px;"><a href="https://www.linkedin.com/company/lets-frotas?${UTM_FIXA}rodape_linkedin" style="text-decoration:none;"><img src="${ICON_LINKEDIN}" width="26" height="26" alt="LinkedIn" style="display:block;border:0;width:26px;height:26px;"></a></td>
+                              <td style="padding-right:10px;"><a href="https://www.facebook.com/letsfrotas?${UTM_FIXA}rodape_facebook" style="text-decoration:none;"><img src="${ICON_FACEBOOK}" width="26" height="26" alt="Facebook" style="display:block;border:0;width:26px;height:26px;"></a></td>
+                              <td style="padding-right:10px;"><a href="https://www.instagram.com/lets.frotas/?${UTM_FIXA}rodape_instagram" style="text-decoration:none;"><img src="${ICON_INSTAGRAM}" width="26" height="26" alt="Instagram" style="display:block;border:0;width:26px;height:26px;"></a></td>
+                              <td><a href="https://www.lets.com.br/?${UTM_FIXA}rodape_site" style="text-decoration:none;"><img src="${ICON_SITE}" width="26" height="26" alt="Site" style="display:block;border:0;width:26px;height:26px;"></a></td>
                             </tr>
                           </table>
                         </td>
@@ -295,7 +314,7 @@ export function montarHTML(dados, opts = {}) {
                     </table>
                   </td>
                   <td valign="middle" width="50%" align="right" style="width:50%;text-align:right;">
-                    <a href="https://www.lets.com.br/?utm_source=egoi&utm_medium=email&utm_campaign=newsletter&utm_content=logo_footer" style="text-decoration:none;display:inline-block;"><img src="${CDN_LOGO}" width="44" height="44" alt="Lets" style="display:block;width:44px;height:44px;"></a>
+                    <a href="https://www.lets.com.br/?${UTM_FIXA}rodape_logo" style="text-decoration:none;display:inline-block;"><img src="${CDN_LOGO}" width="44" height="44" alt="Lets" style="display:block;width:44px;height:44px;"></a>
                   </td>
                 </tr>
               </table>
