@@ -391,7 +391,7 @@ async function completarSelecionados(selecionados, validados, mapaResumos) {
 
     let dados;
     try {
-      const texto = await chamarClaude(promptArtigoAvulso(cand, mapaResumos[cand.url]), { maxTokens: 500 });
+      const texto = await chamarClaude(promptArtigoAvulso(cand, mapaResumos[cand.url]), { maxTokens: 1500 });
       dados = JSON.parse(repairJSON(texto));
     } catch (e) {
       console.log(`⚠️ Falha ao gerar artigo avulso pra "${cand.titulo_original}" (${e.message}), pulando.`);
@@ -446,7 +446,9 @@ async function main() {
     resumo: r.resumo,
     tema: r.tema || 'Outros',
   }));
-  const textoCuradoria = await chamarClaude(promptCuradoria(artigos), { maxTokens: 3000 });
+  // Folga de tokens: o Sonnet 5.5 usa ~30% mais tokens que o 4.5 pro mesmo
+  // texto; com 3000 a curadoria chegou a ser cortada no teste de out/2026.
+  const textoCuradoria = await chamarClaude(promptCuradoria(artigos), { maxTokens: 8000 });
   let dadosCuradoria;
   try {
     dadosCuradoria = JSON.parse(repairJSON(textoCuradoria));
@@ -627,7 +629,7 @@ async function main() {
   }
 
   // "Preparar Redação" + "Claude API - Redação"
-  const textoRedacao = await chamarClaude(promptRedacao(validados, blogRaw), { maxTokens: 3000 });
+  const textoRedacao = await chamarClaude(promptRedacao(validados, blogRaw), { maxTokens: 8000 });
   let edicao;
   try {
     edicao = JSON.parse(repairJSON(textoRedacao));
