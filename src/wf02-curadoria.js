@@ -391,7 +391,7 @@ async function completarSelecionados(selecionados, validados, mapaResumos) {
 
     let dados;
     try {
-      const texto = await chamarClaude(promptArtigoAvulso(cand, mapaResumos[cand.url]), { maxTokens: 500 });
+      const texto = await chamarClaude(promptArtigoAvulso(cand, mapaResumos[cand.url]), { maxTokens: 1500 });
       dados = JSON.parse(repairJSON(texto));
     } catch (e) {
       console.log(`⚠️ Falha ao gerar artigo avulso pra "${cand.titulo_original}" (${e.message}), pulando.`);
@@ -422,7 +422,12 @@ async function main() {
   console.log(`✓ Edição para curadoria: ${edicaoAtual}`);
 
   // "Filtrar Edição Atual"
-  const dessaEdicao = rows.filter((r) => String(r.edicao) === edicaoAtual);
+  // Só a trilha frota (pool da versão geral). As trilhas segmento/Brasil
+  // (out/2026) ficam no banco para a curadoria segmentada; linhas antigas
+  // têm trilha vazia e contam como frota.
+  const dessaEdicao = rows.filter(
+    (r) => String(r.edicao) === edicaoAtual && (!r.trilha || r.trilha === 'frota'),
+  );
   if (dessaEdicao.length === 0) {
     throw new Error(`Nenhum artigo para edição ${edicaoAtual}. WF-01 não rodou ou não encontrou conteúdo.`);
   }
@@ -441,7 +446,9 @@ async function main() {
     resumo: r.resumo,
     tema: r.tema || 'Outros',
   }));
-  const textoCuradoria = await chamarClaude(promptCuradoria(artigos), { maxTokens: 3000 });
+  // Folga de tokens: o Sonnet 5.5 usa ~30% mais tokens que o 4.5 pro mesmo
+  // texto; com 3000 a curadoria chegou a ser cortada no teste de out/2026.
+  const textoCuradoria = await chamarClaude(promptCuradoria(artigos), { maxTokens: 8000 });
   let dadosCuradoria;
   try {
     dadosCuradoria = JSON.parse(repairJSON(textoCuradoria));
@@ -622,7 +629,7 @@ async function main() {
   }
 
   // "Preparar Redação" + "Claude API - Redação"
-  const textoRedacao = await chamarClaude(promptRedacao(validados, blogRaw), { maxTokens: 3000 });
+  const textoRedacao = await chamarClaude(promptRedacao(validados, blogRaw), { maxTokens: 8000 });
   let edicao;
   try {
     edicao = JSON.parse(repairJSON(textoRedacao));

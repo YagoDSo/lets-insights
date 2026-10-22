@@ -1,6 +1,6 @@
 // ════════════════════════════════════════════════════════════
 // WF-01 — Coleta (porte fiel do PROD-WF-01.json do N8N)
-// Fluxo: Ler Edicoes → Config Edição → [16 RSS] → Padronizar →
+// Fluxo: Ler Edicoes → Config Edição → [RSS: 16 de frota + 28 de segmento/Brasil] → Padronizar →
 //   Calcular Idade → Filtrar Palavras-Chave → Deduplicar →
 //   Filtrar Concorrentes → Enriquecer e Limitar → Salvar
 // ════════════════════════════════════════════════════════════
@@ -43,7 +43,52 @@ const FEEDS = [
   { url: 'https://logisticanobrasil.com.br/feed' },
   { url: 'https://ocarreteiro.com.br/feed/' },
   { url: 'https://cargapesada.com.br/feed/' },
+
+  // ── News segmentada (out/2026, ver docs/plano-news-segmentada.md) ──
+  // Cada feed abaixo foi validado em 22/10/2026 (200 + XML de RSS real + item
+  // mais recente com até 14 dias). `segmento` é só uma DICA pro classificador
+  // (classificarSegmento): a notícia ainda precisa casar com as palavras do
+  // setor, e notícias de feeds gerais também podem cair num segmento.
+  // Mineração e siderurgia
+  { url: 'https://revistaminerios.com.br/feed/', fonte: 'Revista Minérios', segmento: 'mineracao' },
+  { url: 'https://www.inthemine.com.br/site/feed/', fonte: 'In The Mine', segmento: 'mineracao' },
+  { url: 'https://brasilminingsite.com.br/feed/', fonte: 'Brasil Mining Site', segmento: 'mineracao' },
+  { url: 'https://siderurgiabrasil.com.br/feed/', fonte: 'Siderurgia Brasil', segmento: 'mineracao' },
+  // Indústria e manufatura
+  { url: 'https://www.cimm.com.br/portal/noticia/rss', fonte: 'CIMM', segmento: 'industria' },
+  { url: 'https://www.automacaoindustrial.info/feed/', fonte: 'Automação Industrial', segmento: 'industria' },
+  { url: 'https://www.usinagem-brasil.com.br/feed/', fonte: 'Usinagem Brasil', segmento: 'industria' },
+  { url: 'https://www.infomoney.com.br/tudo-sobre/industria/feed/', fonte: 'InfoMoney', segmento: 'industria' },
+  { url: 'https://revistapotencia.com.br/feed/', fonte: 'Revista Potência', segmento: 'industria' },
+  { url: 'https://plasticovirtual.com.br/feed/', fonte: 'Plástico Virtual', segmento: 'industria' },
+  { url: 'https://www.autoindustria.com.br/feed/', fonte: 'AutoIndústria', segmento: 'industria' },
+  // Engenharia e construção (ABCR, acima, também cobre)
+  { url: 'https://agenciainfra.com/blog/feed/', fonte: 'Agência iNFRA', segmento: 'engenharia' },
+  { url: 'https://cbic.org.br/feed/', fonte: 'CBIC', segmento: 'engenharia' },
+  { url: 'https://sindusconsp.com.br/feed/', fonte: 'Sinduscon-SP', segmento: 'engenharia' },
+  { url: 'https://www.cimentoitambe.com.br/feed/', fonte: 'Cimento Itambé', segmento: 'engenharia' },
+  { url: 'https://abcp.org.br/feed/', fonte: 'ABCP', segmento: 'engenharia' },
+  // Tecnologia e telecom
+  { url: 'https://teletime.com.br/feed/', fonte: 'TELETIME', segmento: 'tecnologia' },
+  { url: 'https://telesintese.com.br/feed/', fonte: 'TeleSíntese', segmento: 'tecnologia' },
+  { url: 'https://convergenciadigital.com.br/feed/', fonte: 'Convergência Digital', segmento: 'tecnologia' },
+  { url: 'https://itforum.com.br/feed/', fonte: 'IT Forum', segmento: 'tecnologia' },
+  // Florestal e celulose (IBÁ, acima, também cobre)
+  { url: 'https://portalcelulose.com.br/feed/', fonte: 'Portal Celulose', segmento: 'florestal' },
+  { url: 'https://newspulpaper.com/feed/', fonte: 'News Pulp & Paper', segmento: 'florestal' },
+  { url: 'https://comunidadedesilvicultura.com.br/feed/', fonte: 'Comunidade de Silvicultura', segmento: 'florestal' },
+  { url: 'https://portalpackaging.com.br/feed/', fonte: 'Portal Packaging', segmento: 'florestal' },
+  // Brasil (economia, regulação, negócios, operação). Brazil Journal, NeoFeed e
+  // Exame, acima, também alimentam esta trilha.
+  { url: 'https://agenciabrasil.ebc.com.br/rss/economia/feed.xml', fonte: 'Agência Brasil', segmento: 'brasil' },
+  { url: 'https://www.infomoney.com.br/feed/', fonte: 'InfoMoney', segmento: 'brasil' },
+  { url: 'https://www.estadao.com.br/arc/outboundfeeds/feeds/rss/sections/economia/?body=%7B%22layout%22:%22google-news%22%7D', fonte: 'Estadão', segmento: 'brasil' },
+  { url: 'https://g1.globo.com/rss/g1/economia/', fonte: 'g1', segmento: 'brasil' },
 ];
+
+// Feeds gerais de negócios que também alimentam a trilha Brasil (sem dica de segmento).
+const FONTES_NEGOCIOS = new Set(['Brazil Journal', 'NeoFeed', 'Exame']);
+const FEED_POR_URL = new Map(FEEDS.map((f) => [f.url, f]));
 
 // Normaliza texto: minúsculas + remove acentos. Usado nos filtros e no classificador.
 const normalizar = (s) =>
@@ -84,6 +129,7 @@ function padronizar(itens) {
     else if (url.includes('logisticanobrasil.com.br')) fonte = 'Logística no Brasil';
     else if (url.includes('ocarreteiro.com.br')) fonte = 'O Carreteiro';
     else if (url.includes('cargapesada.com.br')) fonte = 'Carga Pesada';
+    else if (FEED_POR_URL.get(it.feedUrl)?.fonte) fonte = FEED_POR_URL.get(it.feedUrl).fonte;
     else if (it.creator) fonte = it.creator;
 
     const dataBruta = it.pubDate || it.isoDate || new Date().toISOString();
@@ -98,6 +144,7 @@ function padronizar(itens) {
         .trim()
         .substring(0, 500),
       fonte,
+      dicaSegmento: FEED_POR_URL.get(it.feedUrl)?.segmento || '',
     };
   });
 
@@ -235,6 +282,26 @@ function filtrarRelevancia(itens) {
   return filtrados;
 }
 
+// News segmentada (out/2026): o filtro de frota acima continua decidindo o pool
+// da versão geral (_frota). Notícia que não fala de frota mas é do setor (ou
+// de Brasil) passa também, marcada só pro pool segmentado.
+function filtrarRelevanciaComSegmentos(itens) {
+  // Pool da versão geral = só os feeds de sempre (sem dica de segmento), pra
+  // ela continuar exatamente como hoje; os feeds novos alimentam só os segmentos.
+  const frota = new Set(filtrarRelevancia(itens.filter((a) => !a.dicaSegmento)));
+  let soSegmento = 0;
+  const out = [];
+  for (const a of itens) {
+    if (frota.has(a)) out.push({ ...a, _frota: true });
+    else if (classificarSegmento(a).segmento) {
+      out.push({ ...a, _frota: false });
+      soSegmento++;
+    }
+  }
+  console.log(`Relevância segmentada: +${soSegmento} artigos de setor/Brasil fora do filtro de frota (total ${out.length})`);
+  return out;
+}
+
 // ─── Nó "Deduplicar" + ENXERTO: anti-duplicação histórica ────
 // (o PROD-WF-01 só dedupava no run; trago o dedup entre edições do outro
 //  export, alinhado ao que o CLAUDE.md marca como ideal.)
@@ -328,6 +395,120 @@ function classificarTema(a) {
   return melhorTema;
 }
 
+// ─── News segmentada (out/2026): segmento por palavras, em TODOS os feeds ───
+// Termos casam como palavra inteira no texto normalizado (sem acento); termo
+// terminado em "*" casa como prefixo ("siderurg*" pega siderurgia/siderúrgica).
+// A dica do feed (fonte setorial) soma pontos, mas a notícia ainda precisa ter
+// pelo menos um termo do setor, pra não carregar post fora do tema que esses
+// portais às vezes publicam.
+const SEGMENTOS = {
+  mineracao: [
+    'mineracao', 'mineradora*', 'minerio*', 'mineral', 'minerais', 'lavra', 'mina', 'minas de', 'siderurg*',
+    'aco', 'acos', 'aciaria', 'gusa', 'pelotizacao', 'niquel', 'cobre', 'litio', 'terras raras', 'bauxita',
+    'aluminio', 'ouro', 'vale', 'samarco', 'usiminas', 'gerdau', 'csn', 'arcelormittal', 'aperam',
+    'anglo american', 'barragem de rejeito*', 'rejeitos', 'ibram', 'anm', 'metalurg*',
+  ],
+  industria: [
+    'industria', 'industrial', 'industriais', 'fabrica', 'fabricas', 'manufatura', 'metalmecanic*', 'usinagem',
+    'maquinas e equipamentos', 'automacao industrial', 'manutencao industrial', 'quimica', 'petroquimic*',
+    'plastico*', 'embalage*', 'autopecas', 'montadora*', 'producao industrial', 'cni', 'abimaq', 'weg',
+    'chao de fabrica', 'linha de producao', 'industria 4.0',
+  ],
+  engenharia: [
+    'construcao civil', 'construtora*', 'obra', 'obras', 'canteiro*', 'infraestrutura', 'pavimentacao',
+    'concreto', 'cimento', 'rodovia', 'rodovias', 'ferrovia*', 'concessao', 'concessoes', 'leilao de rodovia*',
+    'edificac*', 'incorporadora*', 'cbic', 'sinduscon', 'terraplenagem', 'montagem industrial', 'engenharia',
+    'saneamento basico', 'ponte', 'viaduto', 'porto', 'portos',
+  ],
+  tecnologia: [
+    // ("ia" sozinho não entra: colide com o verbo "ia"; "operadora" sozinho pega plano de saúde)
+    'telecom', 'telecomunicac*', '5g', 'fibra optica', 'operadora de telecom*', 'operadoras de telecom*', 'telefonia',
+    'data center*', 'software', 'inteligencia artificial', 'ia generativa', 'nuvem', 'cloud', 'ciberseguranca', 'seguranca cibernetica', 'ti', 'provedor de internet', 'provedores',
+    'anatel', 'conectividade', 'sap', 'erp', 'startup*', 'transformacao digital', 'semicondutor*',
+  ],
+  florestal: [
+    'florestal', 'florestais', 'floresta plantada', 'florestas plantadas', 'silvicultura', 'eucalipto', 'pinus',
+    'celulose', 'papel e celulose', 'papelao', 'madeira', 'paineis de madeira', 'mdf', 'colheita florestal',
+    'suzano', 'klabin', 'eldorado', 'bracell', 'arauco', 'cmpc', 'veracel', 'cenibra', 'dexco', 'iba',
+  ],
+};
+
+// Trilha Brasil: 4 temas que alternam de edição em edição (a curadoria escolhe
+// as 2 mais relevantes da semana, de temas diferentes).
+const TEMAS_BRASIL = {
+  Economia: ['pib', 'inflacao', 'ipca', 'juros', 'selic', 'copom', 'banco central', 'cambio', 'dolar', 'arrecadacao', 'desemprego', 'fiscal', 'orcamento', 'divida publica', 'credito'],
+  Regulacao: ['lei', 'decreto', 'pec', 'reforma tributaria', 'medida provisoria', 'regulamenta*', 'norma', 'normas', 'antt', 'aneel', 'anp', 'senado aprova', 'camara aprova', 'tributo*', 'imposto*', 'stf'],
+  Negocios: ['aquisicao', 'fusao', 'ipo', 'investimento*', 'lucro', 'receita', 'balanco', 'trimestre', 'aporte', 'expansao', 'resultado'],
+  Operacao: ['logistica', 'frete', 'diesel', 'combustive*', 'rodovias', 'portos', 'energia', 'escala de trabalho', 'jornada', 'mao de obra', 'greve', 'abastecimento'],
+};
+// Fora da trilha Brasil: política eleitoral, polícia, esporte, entretenimento.
+const EXCLUSAO_BRASIL = [
+  'eleicao', 'eleicoes', 'eleitoral', 'pesquisa eleitoral', 'segundo turno', '2o turno', 'candidato*', 'campanha eleitoral',
+  'lula', 'flavio', 'bolsonaro', 'partido', 'cpi', 'sigilo', 'policia', 'preso', 'presa', 'assassin*', 'crime',
+  'golpe', 'futebol', 'campeonato', 'novela', 'bbb', 'celebridade*', 'horoscopo', 'mega-sena', 'loteria', 'airbnb',
+];
+
+// Fora de qualquer segmento: transporte público urbano (mesmo critério B2C do
+// filtro de frota), que senão cairia em engenharia por "obra"/"licitação".
+const EXCLUSAO_SEGMENTO = [
+  'metro', 'cptm', 'sptrans', 'viamobilidade', 'onibus urbano', 'transporte publico', 'brt', 'vlt',
+  'tarifa de onibus', 'passageiros', 'linha 10-turquesa', 'trens metropolitanos',
+];
+// Título majoritariamente em inglês (alguns portais misturam): fora.
+const PALAVRAS_INGLES = ['the', 'of', 'and', 'to', 'with', 'who', 'will', 'for', 'new', 'its', 'targets', 'question'];
+const pareceIngles = (titulo) => {
+  const palavras = String(titulo || '').toLowerCase().split(/[^a-z']+/);
+  return palavras.filter((p) => PALAVRAS_INGLES.includes(p)).length >= 2;
+};
+
+const regexDoTermo = (t) => {
+  const prefixo = t.endsWith('*');
+  const base = normalizar(prefixo ? t.slice(0, -1) : t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^a-z0-9])${base}${prefixo ? '' : '(?=[^a-z0-9]|$)'}`);
+};
+const compilar = (lista) => lista.map(regexDoTermo);
+const SEGMENTOS_RE = Object.fromEntries(Object.entries(SEGMENTOS).map(([k, v]) => [k, compilar(v)]));
+const TEMAS_BRASIL_RE = Object.fromEntries(Object.entries(TEMAS_BRASIL).map(([k, v]) => [k, compilar(v)]));
+const EXCLUSAO_BRASIL_RE = compilar(EXCLUSAO_BRASIL);
+const EXCLUSAO_SEGMENTO_RE = compilar(EXCLUSAO_SEGMENTO);
+const contar = (txt, regs) => regs.filter((re) => re.test(txt)).length;
+
+// Devolve { segmento, temaBrasil }. segmento: mineracao | industria |
+// engenharia | tecnologia | florestal | brasil | '' (só trilha frota).
+function classificarSegmento(a) {
+  const txt = normalizar((a.titulo || '') + ' ' + (a.resumo || ''));
+  const dica = a.dicaSegmento || '';
+  const vazio = { segmento: '', temaBrasil: '' };
+  if (pareceIngles(a.titulo) || EXCLUSAO_SEGMENTO_RE.some((re) => re.test(txt))) return vazio;
+
+  let melhor = '';
+  let melhorPontos = 0;
+  for (const [seg, regs] of Object.entries(SEGMENTOS_RE)) {
+    const casos = contar(txt, regs);
+    if (!casos) continue; // sem nenhum termo do setor, nem a dica do feed salva
+    const pontos = casos + (dica === seg ? 2 : 0);
+    if (pontos > melhorPontos) {
+      melhorPontos = pontos;
+      melhor = seg;
+    }
+  }
+  // Feed setorial: 1 termo + dica basta. Feed geral: precisa de 2 termos do setor.
+  if (melhor && melhorPontos >= 2) return { segmento: melhor, temaBrasil: '' };
+
+  // Trilha Brasil: só de feeds de Brasil/negócios, com tema e sem assunto excluído.
+  if (dica === 'brasil' || FONTES_NEGOCIOS.has(a.fonte)) {
+    if (EXCLUSAO_BRASIL_RE.some((re) => re.test(txt))) return { segmento: '', temaBrasil: '' };
+    let tema = '';
+    let max = 0;
+    for (const [t, regs] of Object.entries(TEMAS_BRASIL_RE)) {
+      const n = contar(txt, regs);
+      if (n > max) { max = n; tema = t; }
+    }
+    if (tema) return { segmento: 'brasil', temaBrasil: tema };
+  }
+  return { segmento: '', temaBrasil: '' };
+}
+
 function enriquecerELimitar(itens, edicaoAtual) {
   const MAX_TOTAL = 30;
   const MAX_POR_FONTE = 3;
@@ -356,10 +537,12 @@ function enriquecerELimitar(itens, edicaoAtual) {
     return out;
   };
 
+  // Trilha frota usa só o que passou no filtro de frota (_frota), como sempre.
+  const itensFrota = itens.filter((i) => i._frota);
   let janelaUsada = JANELAS[0];
   let balanceados = [];
   for (const janela of JANELAS) {
-    const dentro = itens.filter((i) => (i.idade_dias ?? 999) <= janela);
+    const dentro = itensFrota.filter((i) => (i.idade_dias ?? 999) <= janela);
     balanceados = aplicarCaps(dentro);
     janelaUsada = janela;
     console.log(`Janela ${janela}d: ${dentro.length} no período, ${balanceados.length} após caps`);
@@ -367,28 +550,84 @@ function enriquecerELimitar(itens, edicaoAtual) {
   }
   console.log(`Janela final: ${janelaUsada}d com ${balanceados.length} artigos`);
 
-  const enriquecidos = balanceados.map((item) => ({
-    edicao: edicaoAtual,
-    data_coleta: dataColeta,
-    titulo: item.titulo,
-    url: item.url,
-    fonte: item.fonte,
-    data_publicacao: item.data,
-    resumo: item.resumo,
-    tema: item._tema || 'Outros',
-    status: 'coletado',
-  }));
+  const montarLinha = (item, trilha) => {
+    const { segmento, temaBrasil } = classificarSegmento(item);
+    return {
+      edicao: edicaoAtual,
+      data_coleta: dataColeta,
+      titulo: item.titulo,
+      url: item.url,
+      fonte: item.fonte,
+      data_publicacao: item.data,
+      resumo: item.resumo,
+      tema: segmento === 'brasil' ? temaBrasil : item._tema || classificarTema(item),
+      status: 'coletado',
+      segmento,
+      trilha,
+    };
+  };
+
+  // Trilha frota: exatamente o pool de sempre (só itens que passaram no filtro
+  // de frota). É o que alimenta a versão geral.
+  const enriquecidos = balanceados.map((item) => montarLinha(item, 'frota'));
+  console.log(`✓ Trilha frota: ${enriquecidos.length} artigos (janela ${janelaUsada}d)`);
+
+  // Trilhas segmento + Brasil: completam cada segmento até a cota, sem repetir
+  // artigo que já entrou no pool de frota (esses já levam o rótulo de segmento).
+  const jaUsados = new Set(enriquecidos.map((e) => e.url));
+  const resto = itens
+    .filter((i) => !jaUsados.has(i.url))
+    .map((i) => ({ ...i, ...classificarSegmento(i) }))
+    .filter((i) => i.segmento);
+  const COTA = { mineracao: 8, industria: 8, engenharia: 8, tecnologia: 8, florestal: 8, brasil: 10 };
+  const ALVO = { mineracao: 4, industria: 4, engenharia: 4, tecnologia: 4, florestal: 4, brasil: 6 };
+  for (const seg of Object.keys(COTA)) {
+    const jaTem = enriquecidos.filter((e) => e.segmento === seg).length;
+    const falta = COTA[seg] - jaTem;
+    if (falta <= 0) continue;
+    const candidatos = resto.filter((i) => i.segmento === seg);
+    let escolhidos = [];
+    let janelaSeg = JANELAS[0];
+    for (const janela of JANELAS) {
+      const dentro = candidatos
+        .filter((i) => (i.idade_dias ?? 999) <= janela)
+        .sort((a, b) => new Date(b.data || 0) - new Date(a.data || 0));
+      const contFonte = {};
+      const contTema = {};
+      escolhidos = [];
+      for (const i of dentro) {
+        const tema = seg === 'brasil' ? i.temaBrasil : 'x';
+        contFonte[i.fonte] = contFonte[i.fonte] || 0;
+        contTema[tema] = contTema[tema] || 0;
+        // Brasil: no máximo 4 do mesmo tema, pra sobrar variedade pra curadoria.
+        if (contFonte[i.fonte] < MAX_POR_FONTE && (seg !== 'brasil' || contTema[tema] < 4)) {
+          escolhidos.push(i);
+          contFonte[i.fonte]++;
+          contTema[tema]++;
+        }
+        if (escolhidos.length >= falta) break;
+      }
+      janelaSeg = janela;
+      if (jaTem + escolhidos.length >= ALVO[seg]) break;
+    }
+    escolhidos.forEach((i) => enriquecidos.push(montarLinha(i, seg === 'brasil' ? 'brasil' : 'segmento')));
+    const total = jaTem + escolhidos.length;
+    console.log(`✓ Trilha ${seg}: ${total} artigos (${jaTem} do pool de frota + ${escolhidos.length} novos, janela ${janelaSeg}d)${total < 2 ? ' ⚠️ menos de 2: WF-02 vai completar com notícia geral' : ''}`);
+  }
 
   const distFonte = {};
   const distTema = {};
+  const distSeg = {};
   enriquecidos.forEach((e) => {
     distFonte[e.fonte] = (distFonte[e.fonte] || 0) + 1;
     distTema[e.tema] = (distTema[e.tema] || 0) + 1;
+    distSeg[e.segmento || '(só frota)'] = (distSeg[e.segmento || '(só frota)'] || 0) + 1;
   });
-  console.log(`✓ WF-01: ${enriquecidos.length} artigos pra edição ${edicaoAtual} (janela ${janelaUsada}d)`);
+  console.log(`✓ WF-01: ${enriquecidos.length} artigos pra edição ${edicaoAtual}`);
   console.log('Distribuição por fonte:', JSON.stringify(distFonte));
   console.log('Distribuição por TEMA:', JSON.stringify(distTema));
-  if (enriquecidos.length < 10) console.log(`⚠️ Só ${enriquecidos.length} artigos. WF-02 vai completar.`);
+  console.log('Distribuição por SEGMENTO:', JSON.stringify(distSeg));
+  if (balanceados.length < 10) console.log(`⚠️ Só ${balanceados.length} artigos na trilha frota. WF-02 vai completar.`);
   return enriquecidos;
 }
 
@@ -409,12 +648,13 @@ async function main() {
     .map((r) => (r.url || r.titulo || '').toLowerCase().trim())
     .filter(Boolean);
 
-  // [16 RSS] → Padronizar → Calcular Idade → Relevância → Dedup → Concorrentes → Enriquecer
+  // [RSS] → Padronizar → Calcular Idade → Relevância (frota OU segmento/Brasil)
+  //   → Dedup → Concorrentes → Enriquecer (trilhas frota, segmento, Brasil)
   const brutos = await lerFeeds(FEEDS);
   let artigos = padronizar(brutos);
 
   artigos = calcularIdade(artigos);
-  artigos = filtrarRelevancia(artigos);
+  artigos = filtrarRelevanciaComSegmentos(artigos);
   artigos = deduplicar(artigos, urlsHistoricas);
   artigos = filtrarConcorrentes(artigos);
 
@@ -438,3 +678,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(1);
   });
 }
+
+// Exportados só para teste local (scripts de ensaio que não gravam no banco).
+export { FEEDS, padronizar, calcularIdade, filtrarRelevanciaComSegmentos, deduplicar, filtrarConcorrentes, enriquecerELimitar, classificarSegmento };

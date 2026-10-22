@@ -4,7 +4,8 @@ import 'dotenv/config';
 export const config = {
   // Claude API
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
-  claudeModel: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929',
+  // out/2026: Sonnet 4.5 → Sonnet 5.5 (com raciocínio desligado, ver lib/claude.js).
+  claudeModel: process.env.CLAUDE_MODEL || 'claude-sonnet-5-5',
 
   // Gemini API (geração de imagem fallback — ver lib/imagegen.js)
   geminiApiKey: process.env.GEMINI_API_KEY,
