@@ -12,7 +12,8 @@ import { config, requireEnv } from './lib/config.js';
 import { lerAba, upsertLinhas, commitarBanco } from './lib/db.js';
 import { montarHTML } from './lib/template.js';
 import { enviarPreview } from './lib/sender.js';
-import { criarRascunho } from './lib/egoi-campaign.js';
+import { criarRascunho, agendarEnvio } from './lib/egoi-campaign.js';
+import { proximoEnvio, checarAntesDeAgendar } from './lib/agendamento.js';
 
 // ─── Orquestração ────────────────────────────────────────────
 async function main() {
@@ -61,17 +62,63 @@ async function main() {
   // a cada campanha, na hora que ele mesmo decidir enviar pelo E-goi.
   // Falha aqui não derruba o WF-03: o preview do Gmail (passo crítico
   // de validação) já foi enviado com sucesso acima.
+  //
+  // Agendamento automático (decisão do Yago em 2026-10-22): com o
+  // interruptor EGOI_AGENDAMENTO=ligado, cada rascunho que passar nas
+  // checagens é agendado pra terça 07h30 (BRT) e o Yago recebe um resumo;
+  // ele cancela pelo painel do E-goi o que estiver errado. Desligado (padrão),
+  // nada muda: só rascunho.
+  const quando = proximoEnvio();
+  const problemas = checarAntesDeAgendar({ montado: principal, previewEnviado: Boolean(messageId) });
+  const resumo = [];
   for (const lista of config.egoiListas) {
+    let hash;
     try {
-      const hash = await criarRascunho({
+      hash = await criarRascunho({
         listId: lista.id,
-        internalName: `POR PUBLICAR · ${principal.titulo_edicao} · ${lista.nome}`,
+        internalName: `${config.egoiAgendamento && !problemas.length ? 'AGENDADA' : 'POR PUBLICAR'} · ${principal.titulo_edicao} · ${lista.nome}`,
         subject: principal.assunto_preview,
         html: principal.html_final,
       });
       console.log(`✓ Rascunho E-goi criado (${lista.nome}): ${hash}`);
     } catch (e) {
       console.error(`✗ Falha ao criar rascunho E-goi (${lista.nome}):`, e.message);
+      resumo.push({ lista: lista.nome, status: 'erro ao criar rascunho', detalhe: e.message });
+      continue;
+    }
+    if (!config.egoiAgendamento) continue;
+    if (problemas.length) {
+      resumo.push({ lista: lista.nome, status: 'NÃO agendada (ficou como rascunho)', detalhe: problemas.join('; ') });
+      continue;
+    }
+    try {
+      await agendarEnvio({ campaignHash: hash, listId: lista.id, segmentIds: lista.segmentIds || [], quando });
+      console.log(`✓ Agendada (${lista.nome}) para ${quando}`);
+      resumo.push({ lista: lista.nome, status: `agendada para ${quando}`, detalhe: hash });
+    } catch (e) {
+      console.error(`✗ Falha ao agendar (${lista.nome}):`, e.message);
+      resumo.push({ lista: lista.nome, status: 'NÃO agendada (erro no E-goi, ficou como rascunho)', detalhe: e.message });
+    }
+  }
+
+  if (config.egoiAgendamento) {
+    const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+    const linhas = resumo
+      .map((r) => `<tr><td style="padding:4px 10px">${esc(r.lista)}</td><td style="padding:4px 10px"><b>${esc(r.status)}</b></td><td style="padding:4px 10px;color:#777">${esc(r.detalhe)}</td></tr>`)
+      .join('');
+    const agendadas = resumo.filter((r) => r.status.startsWith('agendada')).length;
+    try {
+      await enviarPreview({
+        assunto: `Let's Insights ${selected.edicao}: ${agendadas} de ${config.egoiListas.length} campanhas agendadas para ${quando.slice(8, 10)}/${quando.slice(5, 7)} às ${quando.slice(11, 16)}`,
+        html: `<p>Edição ${esc(selected.edicao)} · <b>${esc(principal.assunto_preview)}</b></p>
+<table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px">${linhas}</table>
+<p>Para cancelar: no painel do E-goi, abra a campanha agendada (nome começando com "AGENDADA ·") e cancele o agendamento antes do horário.</p>
+<p>Para desligar o agendamento automático: mude a variável <code>EGOI_AGENDAMENTO</code> no GitHub para qualquer valor diferente de "ligado".</p>`,
+        para: config.previewTo,
+      });
+      console.log('✓ Resumo do agendamento enviado ao Yago');
+    } catch (e) {
+      console.error('✗ Falha ao enviar resumo do agendamento:', e.message);
     }
   }
 

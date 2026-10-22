@@ -26,6 +26,9 @@ export const config = {
 
   // E-goi (criação de rascunhos "POR PUBLICAR" — ver lib/egoi-campaign.js)
   egoiSenderId: Number(process.env.EGOI_SENDER_ID) || 2, // "Let's Terceirização de Frotas" <lets@lets.com.br>
+  // Interruptor do agendamento automático (decisão de 2026-10-22). Só liga
+  // com o valor exato "ligado" na variável EGOI_AGENDAMENTO do GitHub.
+  egoiAgendamento: process.env.EGOI_AGENDAMENTO === 'ligado',
   egoiListas: [
     { id: Number(process.env.EGOI_LIST_GESTORES) || 67, nome: 'Gestores 2025' },
     { id: Number(process.env.EGOI_LIST_CONDUTORES) || 34, nome: 'Condutores 2023' },
