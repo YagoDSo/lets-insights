@@ -76,3 +76,7 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           PREVIEW_TO: ${{ secrets.PREVIEW_TO }}
           EGOI_API_KEY: ${{ secrets.EGOI_API_KEY }}
+          # Interruptor do agendamento automático no E-goi (decisão de 2026-10-22).
+          # Variável (não secret) do repositório: só agenda com o valor "ligado".
+          # Sem a variável criada, o WF-03 só cria rascunhos, como antes.
+          EGOI_AGENDAMENTO: ${{ vars.EGOI_AGENDAMENTO }}
