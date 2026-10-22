@@ -60,6 +60,18 @@ function conectar() {
     _db.exec(`ALTER TABLE ${config.abaEdicoes} ADD COLUMN json_assunto_manchetes TEXT`);
   }
 
+  // Migração aditiva (out/2026, news segmentada — ver docs/plano-news-segmentada.md):
+  // segmento = mineracao | industria | engenharia | tecnologia | florestal | brasil | '';
+  // trilha = frota (pool da versão geral) | segmento | brasil. Linhas antigas
+  // ficam com as duas vazias, o que equivale a "frota".
+  const colunasArtigos = _db.prepare(`PRAGMA table_info(${config.abaArtigos})`).all().map((c) => c.name);
+  if (!colunasArtigos.includes('segmento')) {
+    _db.exec(`ALTER TABLE ${config.abaArtigos} ADD COLUMN segmento TEXT`);
+  }
+  if (!colunasArtigos.includes('trilha')) {
+    _db.exec(`ALTER TABLE ${config.abaArtigos} ADD COLUMN trilha TEXT`);
+  }
+
   return _db;
 }
 

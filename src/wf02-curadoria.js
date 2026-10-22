@@ -422,7 +422,12 @@ async function main() {
   console.log(`✓ Edição para curadoria: ${edicaoAtual}`);
 
   // "Filtrar Edição Atual"
-  const dessaEdicao = rows.filter((r) => String(r.edicao) === edicaoAtual);
+  // Só a trilha frota (pool da versão geral). As trilhas segmento/Brasil
+  // (out/2026) ficam no banco para a curadoria segmentada; linhas antigas
+  // têm trilha vazia e contam como frota.
+  const dessaEdicao = rows.filter(
+    (r) => String(r.edicao) === edicaoAtual && (!r.trilha || r.trilha === 'frota'),
+  );
   if (dessaEdicao.length === 0) {
     throw new Error(`Nenhum artigo para edição ${edicaoAtual}. WF-01 não rodou ou não encontrou conteúdo.`);
   }

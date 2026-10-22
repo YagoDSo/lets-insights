@@ -26,6 +26,7 @@ export async function lerFeeds(feeds) {
           content: it.content || it['content:encoded'],
           description: it.summary || it.description,
           creator: it.creator || it['dc:creator'],
+          feedUrl: f.url, // permite ao WF-01 saber de qual feed veio (fonte + dica de segmento)
         }));
       } catch (e) {
         console.log(`⚠️ Feed falhou (${f.url}): ${e.message}`);
