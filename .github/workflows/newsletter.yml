@@ -2,8 +2,9 @@ name: Let's Insights — newsletter semanal
 
 # Roda toda segunda de MADRUGADA: 05:17 UTC = 02:17 BRT (UTC-3). Desde
 # out/2026 a curadoria e a redação usam a API de lote da Claude (metade do
-# preço, sem prazo garantido); começar cedo dá tempo de esperar o lote até
-# 06:00 BRT, com volta para a chamada normal depois disso (ver lib/claude.js).
+# preço, sem prazo garantido); começar cedo dá tempo de esperar o lote (até
+# 14:30 BRT ou 5h30 de espera, o que vier primeiro), com volta para a chamada
+# normal depois disso (ver lib/claude.js). O preview pode chegar até as 15h.
 # Minuto quebrado (17, não 00) de propósito: execuções agendadas em hora cheia
 # sofrem mais atraso de fila. Mesmo assim o GitHub pode atrasar muito: em
 # 26/10/2026 a execução marcada para 05:53 BRT só começou às 12:30.
@@ -39,6 +40,9 @@ jobs:
   wf02-curadoria:
     needs: wf01-coleta
     runs-on: ubuntu-latest
+    # Espera do lote da Claude: no máximo 5h30 (CLAUDE_LOTE_ESPERA_MAX_MIN);
+    # o GitHub encerra job com mais de 6h.
+    timeout-minutes: 355
     # contents:write necessário pra commitar a imagem gerada via IA (fallback) e o banco SQLite — ver lib/gitAssets.js e lib/db.js
     permissions:
       contents: write

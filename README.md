@@ -26,7 +26,7 @@ As trilhas de segmento e Brasil alimentam a **news segmentada**, ainda em constr
 
 - Modelo **`claude-sonnet-5-5` com raciocínio desligado** (`thinking: {type: "between_tools"}`, em `src/lib/claude.js`). Não usar no modo padrão: fica mais caro e cortou a curadoria no limite de tokens no teste.
 - Respostas em **JSON com formato fixo** (saída estruturada, `schema`): sem isso o Sonnet 5.5 chegou a devolver dois JSONs com comentários (edição 22).
-- **API de lote (metade do preço):** espera o resultado até 06:00 (Brasília); depois disso cancela e faz a chamada normal. Desliga com `CLAUDE_LOTE=desligado`.
+- **API de lote (metade do preço):** espera o resultado até as 14:30 (Brasília) ou até 5h30 de espera, o que vier primeiro (o GitHub encerra job com mais de 6h); depois disso cancela e faz a chamada normal. O preview pode chegar até as 15h de segunda. Desliga com `CLAUDE_LOTE=desligado`.
 - Imagem faltando: gerada pelo Gemini (`src/lib/imagegen.js`). Imagem em CDN compartilhado (ex.: Webflow): baixada e re-hospedada (`src/lib/rehost.js`). As duas vão para `public/generated/` e são servidas por `raw.githubusercontent.com` (por isso o repositório é público).
 
 ### WF-03 · E-goi
