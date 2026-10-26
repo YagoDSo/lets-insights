@@ -6,7 +6,7 @@ Regras de copy, decisões fechadas e histórico detalhado: ver [`CLAUDE.md`](CLA
 
 ## Como roda
 
-`.github/workflows/newsletter.yml`: toda **segunda às 05:53 (horário de Brasília)** (`cron: "53 8 * * 1"`), ou manualmente pela aba Actions. As três etapas são **encadeadas** (`needs`): cada uma só começa se a anterior passar.
+`.github/workflows/newsletter.yml`: toda **segunda às 02:17 (horário de Brasília)** (`cron: "17 5 * * 1"`), ou manualmente pela aba Actions. O GitHub pode atrasar execuções agendadas (em 26/10/2026 foram quase 7 horas). As três etapas são **encadeadas** (`needs`): cada uma só começa se a anterior passar.
 
 | Etapa | Script | O que faz |
 |---|---|---|
@@ -25,6 +25,8 @@ As trilhas de segmento e Brasil alimentam a **news segmentada**, ainda em constr
 ### WF-02 · Claude API
 
 - Modelo **`claude-sonnet-5-5` com raciocínio desligado** (`thinking: {type: "between_tools"}`, em `src/lib/claude.js`). Não usar no modo padrão: fica mais caro e cortou a curadoria no limite de tokens no teste.
+- Respostas em **JSON com formato fixo** (saída estruturada, `schema`): sem isso o Sonnet 5.5 chegou a devolver dois JSONs com comentários (edição 22).
+- **API de lote (metade do preço):** espera o resultado até 06:00 (Brasília); depois disso cancela e faz a chamada normal. Desliga com `CLAUDE_LOTE=desligado`.
 - Imagem faltando: gerada pelo Gemini (`src/lib/imagegen.js`). Imagem em CDN compartilhado (ex.: Webflow): baixada e re-hospedada (`src/lib/rehost.js`). As duas vão para `public/generated/` e são servidas por `raw.githubusercontent.com` (por isso o repositório é público).
 
 ### WF-03 · E-goi

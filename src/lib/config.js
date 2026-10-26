@@ -6,6 +6,10 @@ export const config = {
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   // out/2026: Sonnet 4.5 → Sonnet 5.5 (com raciocínio desligado, ver lib/claude.js).
   claudeModel: process.env.CLAUDE_MODEL || 'claude-sonnet-5-5',
+  // out/2026: chamadas via API de lote (metade do preço), com volta para a
+  // chamada normal se o lote não terminar até loteLimite (horário de Brasília).
+  claudeLote: process.env.CLAUDE_LOTE !== 'desligado',
+  loteLimite: process.env.CLAUDE_LOTE_LIMITE || '06:00',
 
   // Gemini API (geração de imagem fallback — ver lib/imagegen.js)
   geminiApiKey: process.env.GEMINI_API_KEY,
