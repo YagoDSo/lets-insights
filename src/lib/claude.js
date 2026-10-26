@@ -30,27 +30,35 @@ const SEM_RACIOCINIO = /^claude-sonnet-5-5/;
 // do GitHub), nem tenta o lote. Desliga com CLAUDE_LOTE=desligado.
 const esperar = (ms) => new Promise((ok) => setTimeout(ok, ms));
 
-// Horário limite de hoje, em Brasília (UTC-3, sem horário de verão desde 2019).
-function limiteDeHoje(agora = new Date()) {
+// Início deste processo (= início do job no GitHub, que encerra jobs com mais de 6h).
+const INICIO = Date.now();
+
+// Prazo do lote: o que vier primeiro entre o horário limite de hoje em
+// Brasília (UTC-3, sem horário de verão desde 2019) e o teto de espera
+// contado desde o início do processo.
+export function limiteDeHoje(agora = new Date(), inicio = INICIO) {
   const [h, m] = config.loteLimite.split(':').map(Number);
   const brt = new Date(agora.getTime() - 3 * 3600e3);
-  return new Date(Date.UTC(brt.getUTCFullYear(), brt.getUTCMonth(), brt.getUTCDate(), h + 3, m));
+  const absoluto = Date.UTC(brt.getUTCFullYear(), brt.getUTCMonth(), brt.getUTCDate(), h + 3, m);
+  const teto = inicio + config.loteEsperaMaxMin * 60e3;
+  return new Date(Math.min(absoluto, teto));
 }
 
 async function viaLote(params) {
   if (!config.claudeLote) return null;
   const limite = limiteDeHoje();
+  const prazo = new Date(limite.getTime() - 3 * 3600e3).toISOString().slice(11, 16) + ' BRT';
   if (Date.now() >= limite.getTime()) {
-    console.log(`  Lote ignorado: já passou do limite de ${config.loteLimite}; usando chamada normal.`);
+    console.log(`  Lote ignorado: já passou do prazo (${prazo}); usando chamada normal.`);
     return null;
   }
   let lote;
   try {
     lote = await client().messages.batches.create({ requests: [{ custom_id: 'pedido', params }] });
-    console.log(`  Lote criado (${lote.id}); limite ${config.loteLimite} BRT.`);
+    console.log(`  Lote criado (${lote.id}); prazo ${prazo}.`);
     while (lote.processing_status !== 'ended') {
       if (Date.now() >= limite.getTime()) {
-        console.log(`  ⚠️ Lote ${lote.id} não terminou até ${config.loteLimite}: cancelando e usando chamada normal.`);
+        console.log(`  ⚠️ Lote ${lote.id} não terminou até ${prazo}: cancelando e usando chamada normal.`);
         await client().messages.batches.cancel(lote.id).catch(() => {});
         return null;
       }

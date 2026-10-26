@@ -9,7 +9,11 @@ export const config = {
   // out/2026: chamadas via API de lote (metade do preço), com volta para a
   // chamada normal se o lote não terminar até loteLimite (horário de Brasília).
   claudeLote: process.env.CLAUDE_LOTE !== 'desligado',
-  loteLimite: process.env.CLAUDE_LOTE_LIMITE || '06:00',
+  // 14:30: o preview pode chegar até as 15h de segunda (decisão do Yago,
+  // 26/10/2026); 30 min de folga pra chamada normal, imagens e WF-03.
+  loteLimite: process.env.CLAUDE_LOTE_LIMITE || '14:30',
+  // Teto de espera por execução: o GitHub encerra job com mais de 6h.
+  loteEsperaMaxMin: Number(process.env.CLAUDE_LOTE_ESPERA_MAX_MIN) || 330,
 
   // Gemini API (geração de imagem fallback — ver lib/imagegen.js)
   geminiApiKey: process.env.GEMINI_API_KEY,
