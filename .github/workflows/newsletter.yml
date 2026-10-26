@@ -1,15 +1,16 @@
 name: Let's Insights — newsletter semanal
 
-# Roda toda segunda de manhã (geração adiantada — antes rodava terça, ver
-# CLAUDE.md regra "Decisão de horário"). GitHub Actions usa UTC;
-# 08:53 UTC = 05:53 BRT (UTC-3). Minuto quebrado (53, não 00) de propósito:
-# runs agendadas em hora cheia vêm sofrendo atraso de fila de ~4h30
-# (registrado na memória do projeto em 2026-09-22); alguns minutos antes
-# das 06:00 pedidas dá folga sem fugir do horário desejado.
+# Roda toda segunda de MADRUGADA: 05:17 UTC = 02:17 BRT (UTC-3). Desde
+# out/2026 a curadoria e a redação usam a API de lote da Claude (metade do
+# preço, sem prazo garantido); começar cedo dá tempo de esperar o lote até
+# 06:00 BRT, com volta para a chamada normal depois disso (ver lib/claude.js).
+# Minuto quebrado (17, não 00) de propósito: execuções agendadas em hora cheia
+# sofrem mais atraso de fila. Mesmo assim o GitHub pode atrasar muito: em
+# 26/10/2026 a execução marcada para 05:53 BRT só começou às 12:30.
 # Também pode ser disparado manualmente pela aba Actions (workflow_dispatch).
 on:
   schedule:
-    - cron: "53 8 * * 1"
+    - cron: "17 5 * * 1"
   workflow_dispatch:
 
 # Etapas ENCADEADAS de verdade: cada job só começa se o anterior passar (needs).
