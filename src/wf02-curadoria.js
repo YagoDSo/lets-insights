@@ -348,6 +348,60 @@ ${JSON.stringify(
 // instruction-following do modelo) mesmo havendo candidato validado e sem
 // conflito de fonte/tema disponível. Em vez de publicar a edição capenga,
 // completa com uma chamada avulsa focada só nesse artigo.
+// ─── Formatos de resposta (saída estruturada, out/2026) ──────
+// Espelham exatamente os JSON pedidos nos prompts acima. Com eles a API só
+// devolve um JSON válido nesse formato, sem texto antes ou depois.
+const STR = { type: 'string' };
+const SCHEMA_CURADORIA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['selecionados'],
+  properties: {
+    selecionados: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['titulo_original', 'url', 'fonte', 'data', 'tema', 'score', 'justificativa', 'categoria'],
+        properties: {
+          titulo_original: STR, url: STR, fonte: STR, data: STR, tema: STR,
+          score: { type: 'number' }, justificativa: STR, categoria: STR,
+        },
+      },
+    },
+  },
+};
+const SCHEMA_REDACAO = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['titulo_edicao', 'pre_header', 'artigos_selecionados', 'blog', 'cta_final'],
+  properties: {
+    titulo_edicao: STR,
+    pre_header: STR,
+    artigos_selecionados: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['categoria', 'titulo', 'url', 'fonte', 'imagem'],
+        properties: { categoria: STR, titulo: STR, url: STR, fonte: STR, imagem: { type: ['string', 'null'] } },
+      },
+    },
+    blog: {
+      type: 'object', additionalProperties: false, required: ['categoria', 'titulo'],
+      properties: { categoria: STR, titulo: STR },
+    },
+    cta_final: {
+      type: 'object', additionalProperties: false, required: ['titulo', 'texto', 'botao'],
+      properties: { titulo: STR, texto: STR, botao: STR },
+    },
+  },
+};
+const SCHEMA_ARTIGO_AVULSO = {
+  type: 'object', additionalProperties: false, required: ['categoria', 'titulo'],
+  properties: { categoria: STR, titulo: STR },
+};
+
 function promptArtigoAvulso(artigo, resumoOriginal) {
   return `Você é o redator-chefe da newsletter 'Let's Insights', B2B da Let's (gestão de frotas do Grupo Águia Branca) voltada pra gestores de frota, coordenadores de campo, QSMS e engenheiros de campo em operação com veículos 4x4.
 
@@ -391,7 +445,7 @@ async function completarSelecionados(selecionados, validados, mapaResumos) {
 
     let dados;
     try {
-      const texto = await chamarClaude(promptArtigoAvulso(cand, mapaResumos[cand.url]), { maxTokens: 1500 });
+      const texto = await chamarClaude(promptArtigoAvulso(cand, mapaResumos[cand.url]), { maxTokens: 1500, schema: SCHEMA_ARTIGO_AVULSO });
       dados = JSON.parse(repairJSON(texto));
     } catch (e) {
       console.log(`⚠️ Falha ao gerar artigo avulso pra "${cand.titulo_original}" (${e.message}), pulando.`);
@@ -448,7 +502,7 @@ async function main() {
   }));
   // Folga de tokens: o Sonnet 5.5 usa ~30% mais tokens que o 4.5 pro mesmo
   // texto; com 3000 a curadoria chegou a ser cortada no teste de out/2026.
-  const textoCuradoria = await chamarClaude(promptCuradoria(artigos), { maxTokens: 8000 });
+  const textoCuradoria = await chamarClaude(promptCuradoria(artigos), { maxTokens: 8000, schema: SCHEMA_CURADORIA });
   let dadosCuradoria;
   try {
     dadosCuradoria = JSON.parse(repairJSON(textoCuradoria));
@@ -629,7 +683,7 @@ async function main() {
   }
 
   // "Preparar Redação" + "Claude API - Redação"
-  const textoRedacao = await chamarClaude(promptRedacao(validados, blogRaw), { maxTokens: 8000 });
+  const textoRedacao = await chamarClaude(promptRedacao(validados, blogRaw), { maxTokens: 8000, schema: SCHEMA_REDACAO });
   let edicao;
   try {
     edicao = JSON.parse(repairJSON(textoRedacao));

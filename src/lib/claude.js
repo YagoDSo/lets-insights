@@ -22,11 +22,16 @@ function client() {
 const SEM_RACIOCINIO = /^claude-sonnet-5-5/;
 
 // Manda 1 mensagem de usuário e devolve o texto da resposta.
-export async function chamarClaude(prompt, { maxTokens = 4000, model = config.claudeModel } = {}) {
+// schema (opcional): JSON Schema da resposta. Com ele, a API só devolve JSON
+// válido nesse formato (saída estruturada). Necessário desde 26/10/2026: o
+// Sonnet 5.5 respondeu a curadoria com dois JSONs e comentários entre eles,
+// apesar do "Retorne APENAS JSON" no prompt, e a edição 22 falhou no parse.
+export async function chamarClaude(prompt, { maxTokens = 4000, model = config.claudeModel, schema } = {}) {
   const resp = await client().messages.create({
     model,
     max_tokens: maxTokens,
     ...(SEM_RACIOCINIO.test(model) ? { thinking: { type: 'between_tools' } } : {}),
+    ...(schema ? { output_config: { format: { type: 'json_schema', schema } } } : {}),
     messages: [{ role: 'user', content: prompt }],
   });
   if (resp.stop_reason === 'max_tokens') {
