@@ -18,8 +18,14 @@ function client() {
 // estourou o max_tokens da curadoria e devolveu JSON cortado. Com
 // `between_tools` o raciocínio fica desligado: no mesmo teste saiu 18% mais
 // barato que o Sonnet 4.5 e seguiu melhor as regras do prompt. Esse modo só
-// existe no Sonnet 5.5, por isso é condicional ao modelo.
-const SEM_RACIOCINIO = /^claude-sonnet-5-5/;
+// existe no Sonnet 5.5, por isso é condicional ao modelo. No Haiku 5.5
+// (curadoria, nov/2026) o raciocínio também vem ligado por padrão e se
+// desliga com `disabled`.
+function semRaciocinio(model) {
+  if (/^claude-sonnet-5-5/.test(model)) return { thinking: { type: 'between_tools' } };
+  if (/^claude-haiku-5-5/.test(model)) return { thinking: { type: 'disabled' } };
+  return {};
+}
 
 // ─── Processamento em lote (out/2026) ─────────────────────────
 // A API de lote (Message Batches) cobra metade do preço, mas não garante
@@ -91,7 +97,7 @@ export async function chamarClaude(prompt, { maxTokens = 4000, model = config.cl
   const params = {
     model,
     max_tokens: maxTokens,
-    ...(SEM_RACIOCINIO.test(model) ? { thinking: { type: 'between_tools' } } : {}),
+    ...semRaciocinio(model),
     ...(schema ? { output_config: { format: { type: 'json_schema', schema } } } : {}),
     messages: [{ role: 'user', content: prompt }],
   };

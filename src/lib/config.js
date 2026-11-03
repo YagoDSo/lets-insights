@@ -6,6 +6,9 @@ export const config = {
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   // out/2026: Sonnet 4.5 → Sonnet 5.5 (com raciocínio desligado, ver lib/claude.js).
   claudeModel: process.env.CLAUDE_MODEL || 'claude-sonnet-5-5',
+  // nov/2026: curadoria no Haiku 5.5 (~19x mais barato que o Sonnet no teste
+  // das edições 19-23), decisão do Yago por verba. A redação fica no Sonnet.
+  claudeModelCuradoria: process.env.CLAUDE_MODEL_CURADORIA || 'claude-haiku-5-5',
   // out/2026: chamadas via API de lote (metade do preço), com volta para a
   // chamada normal se o lote não terminar até loteLimite (horário de Brasília).
   claudeLote: process.env.CLAUDE_LOTE !== 'desligado',
