@@ -19,6 +19,9 @@
 // código distribui os artigos nas versões (distribuirArtigos); a redação
 // escreve cada artigo uma vez e o assunto/pré-header de cada versão. Grava
 // a versão geral em edicoes (como antes) e as 7 versões em edicoes_versoes.
+// A validação inclui a verificação de integridade de conteúdo
+// (lib/integridade.js, criada após o link sequestrado da edição 16):
+// reprovado vai pra quarentena e o diagnóstico vai pra json_diagnostico.
 // ════════════════════════════════════════════════════════════
 import { config, requireEnv } from './lib/config.js';
 import { lerAba, upsertLinhas, commitarBanco } from './lib/db.js';
@@ -26,29 +29,11 @@ import { chamarClaude } from './lib/claude.js';
 import { repairJSON } from './lib/repair.js';
 import { commitarImagensGeradas } from './lib/gitAssets.js';
 import { precisaRehospedar, baixarImagem } from './lib/rehost.js';
+import { verificarIntegridade, resumirMotivos, extrairTextoVisivel } from './lib/integridade.js';
+import { buscarPagina, buscarHTML } from './lib/paginas.js';
 
 const FALLBACK_BLOG_IMG =
   'https://cdn.prod.website-files.com/67d2cd7e700eb793f98a2e81/6a04acd2772388e00bdf5a8d_Gemini_Generated_Image_nmyoe6nmyoe6nmyo.png';
-
-// ─── Buscar HTML (GET, tolerante a falha, timeout 15s) — usado tanto pra
-// artigos coletados (via link normalizado, pode vir com encoding estranho
-// do RSS) quanto pro scraping do blog Lets (URLs sempre nossas, sem esse
-// problema; encodeURI/decodeURI aqui são no-op nesse caso). ─────────────
-async function buscarHTML(url) {
-  try {
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 15000);
-    const resp = await fetch(encodeURI(decodeURIComponent(url)), {
-      redirect: 'follow',
-      signal: controller.signal,
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LetsInsights-Bot/1.0; +https://www.lets.com.br)' },
-    });
-    clearTimeout(t);
-    return await resp.text();
-  } catch {
-    return '';
-  }
-}
 
 // ─── Extrair Imagem (og:image → twitter:image → image_src) ───
 function extrairImagem(html) {
@@ -146,34 +131,12 @@ function extrairDescricaoPost(htmlPost) {
   return m ? m[1].trim() : null;
 }
 
-// ─── Blog Lets: texto completo do artigo (corpo da página, sem nav/
-// footer/script/style), pra IA extrair números e detalhes específicos
-// em vez de só reescrever a meta description (curta, genérica, escrita
-// pra SEO). Corta em 6000 caracteres — sobra pra qualquer post do blog,
-// evita gastar tokens à toa se a página vier maior que o esperado. ────
-function extrairTextoArtigo(htmlPost) {
-  if (!htmlPost || htmlPost.length < 500) return null;
-  let corpo = htmlPost;
-  const bodyMatch = corpo.match(/<body[^>]*>([\s\S]*)<\/body>/i);
-  if (bodyMatch) corpo = bodyMatch[1];
-  corpo = corpo
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
-    .replace(/<header[\s\S]*?<\/header>/gi, ' ')
-    .replace(/<footer[\s\S]*?<\/footer>/gi, ' ');
-  let texto = corpo
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (texto.length < 100) return null; // extração falhou (página estranha/vazia)
-  if (texto.length > 6000) texto = texto.slice(0, 6000) + '...';
-  return texto;
-}
+// ─── Blog Lets: texto completo do artigo ──────────────────────
+// A limpeza de HTML vive em lib/integridade.js (mesma função que as
+// verificações de integridade usam pra ler o corpo das páginas dos
+// artigos). Corta em 6000 caracteres — sobra pra qualquer post do blog,
+// evita gastar tokens à toa se a página vier maior que o esperado.
+const extrairTextoArtigo = (htmlPost) => extrairTextoVisivel(htmlPost, 6000);
 
 // ─── Validar URLs Vivas (HEAD, timeout 5s) ───────────────────
 // Retenta uma vez em status tipicamente transitório (rate-limit/anti-bot do
@@ -616,20 +579,47 @@ async function main() {
   }
   console.log(`Curadoria: ${LISTAS_CURADORIA.map((l) => `${l} ${selecionadosPorLista[l].length}`).join(' | ')}`);
 
-  // "Buscar HTML do Artigo" + "Extrair Imagem" + "Validar URLs Vivas", uma vez
-  // por artigo (a curadoria pode, contra a regra, pôr o mesmo id em 2 listas).
+  // "Buscar HTML do Artigo" + "Extrair Imagem" + "Validar URLs Vivas" +
+  // "Verificar Integridade", uma vez por artigo (a curadoria pode, contra a
+  // regra, pôr o mesmo id em 2 listas). A integridade (lib/integridade.js)
+  // roda sobre o MESMO HTML baixado pra extrair a imagem: nenhuma requisição
+  // nem token a mais. Reprovado sai da lista e a reserva ocupa o lugar;
+  // nunca dispara nova chamada de curadoria ou redação.
   const unicos = [...new Map(Object.values(selecionadosPorLista).flat().map((s) => [s.id, s])).values()];
   console.log(`\nValidando ${unicos.length} artigos...`);
   let descartados = 0;
   let imagensDescartadas = 0;
+  const diagnostico = [];
+  const registrarDiagnostico = (artigo, acao, motivos) => diagnostico.push({
+    etapa: `wf02 · ${artigo.lista}`, acao, url: artigo.url, fonte: artigo.fonte, titulo: artigo.titulo_original, motivos,
+  });
   const resultadoValidacao = await mapLimitado(unicos, 4, async (artigo) => {
     const vURL = await validarURL(artigo.url);
     if (deveDescartar(vURL)) {
       console.log(`  ✗ DESCARTADO (HTTP ${vURL.status}): ${artigo.titulo_original} (${artigo.fonte})`);
+      registrarDiagnostico(artigo, 'descartado', [{ codigo: 'http_invalido', peso: 'grave', detalhe: `HTTP ${vURL.status}` }]);
       descartados++;
       return null;
     }
-    let imagem = extrairImagem(await buscarHTML(artigo.url));
+    const { html, urlFinal } = await buscarPagina(artigo.url);
+    let imagem = extrairImagem(html);
+    // Título e resumo como o feed RSS publicou: é contra isso que a página
+    // real é comparada (edição 16: URL sequestrada respondia 200).
+    const rss = porId.get(artigo.id);
+    const integridade = verificarIntegridade({
+      url: artigo.url, urlFinal, html, tituloRss: rss.titulo, resumoRss: rss.resumo || '', imagem,
+    });
+    if (!integridade.ok) {
+      console.log(`  ✗ DESCARTADO por integridade: ${artigo.titulo_original} (${artigo.fonte}) · ${resumirMotivos(integridade.motivos)}`);
+      registrarDiagnostico(artigo, 'descartado', integridade.motivos);
+      descartados++;
+      return null;
+    }
+    if (integridade.motivos.length > 0) {
+      // Passou com ressalva: não descarta, só aparece no diagnóstico do preview.
+      console.log(`      ↳ integridade: ${resumirMotivos(integridade.motivos)}`);
+      registrarDiagnostico(artigo, 'ressalva', integridade.motivos);
+    }
     if (imagem && deveDescartar(await validarURL(imagem))) {
       imagem = null;
       imagensDescartadas++;
@@ -821,7 +811,9 @@ async function main() {
   };
   const itemFinal = (it) => (it.tipo === 'blog'
     ? blogFinal
-    : { tipo: 'noticia', categoria: it.categoriaFinal, titulo: it.tituloFinal, url: it.url, fonte: it.fonte, imagem: it.imagem });
+    // titulo_original (como o feed publicou) viaja até o banco: é o que o
+    // WF-03 compara na reconferência de integridade. O template ignora o campo.
+    : { tipo: 'noticia', categoria: it.categoriaFinal, titulo: it.tituloFinal, url: it.url, fonte: it.fonte, imagem: it.imagem, titulo_original: it.titulo_original });
 
   const agora = new Date().toISOString();
   const linhasVersoes = [];
@@ -865,6 +857,7 @@ async function main() {
     json_artigos_cards: JSON.stringify([]),
     json_blog: JSON.stringify(blogFinal),
     json_cta: JSON.stringify(redacao.cta_final),
+    json_diagnostico: JSON.stringify(diagnostico),
     status: 'pronto_envio_com_imagens',
     gerado_em: agora,
   };
