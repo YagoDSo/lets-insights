@@ -7,6 +7,13 @@
 // frase (sem botão) — o destaque do blog Lets primeiro, depois os 3 artigos
 // selecionados. O blog usa "Ler artigo" (os artigos usam "Ler matéria") e
 // entra com utm_content=blog; os demais usam noticia_N.
+//
+// nov/2026: news segmentada. A edição pode vir como uma versão de
+// edicoes_versoes (json_itens: lista de N itens na ordem do e-mail, com
+// tipo 'blog' | 'noticia') ou como a linha de edicoes (blog + 3 artigos).
+// opts.semCta tira o botão "Falar com Especialista" (versões para clientes
+// da lista 67) e opts.linhaIdentidade põe no lugar uma linha de rodapé.
+// O teste de posição do CTA (início/meio/fim, ago/2026) foi encerrado.
 const CDN_LOGO = 'https://cdn.mcauto-images-production.sendgrid.net/aead0c601c58f7b7/b50dc1d4-8f4c-42a7-8df1-f4fa39d98c24/87x86.png';
 const ICON_LINKEDIN = 'https://cdn.mcauto-images-production.sendgrid.net/aead0c601c58f7b7/edfb426e-900e-4c9a-866b-22ae164aeafe/48x48.png';
 const ICON_FACEBOOK = 'https://cdn.mcauto-images-production.sendgrid.net/aead0c601c58f7b7/98736dd2-68d2-4613-bdc5-024c87df3b29/48x48.png';
@@ -49,7 +56,8 @@ const CTA_URL = `https://www.lets.com.br/solicitar-proposta?${UTM_FIXA}botao_cta
 // imagem cheia no topo, texto centralizado, "Leia mais" como link em negrito
 // embutido na frase (não botão). isLast controla o padding do divisor final;
 // isBlog troca o texto do link e o utm_content.
-const renderItem = (item, isLast, idx, isBlog) => {
+const renderItem = (item, isLast, idx) => {
+  const isBlog = item.tipo === 'blog';
   const padBaixo = isLast ? '0 32px 8px' : '0 32px';
   const textoLink = isBlog ? 'Ler artigo' : 'Ler matéria';
   const utmContent = isBlog ? 'blog' : `noticia_${idx}`;
@@ -57,11 +65,11 @@ const renderItem = (item, isLast, idx, isBlog) => {
   <tr>
     <td bgcolor="#ffffff" class="dm-body-bg" style="background-color:#ffffff;padding:24px 32px;" align="center">
       <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
-        <tr>
+        ${!item.imagem ? '' : `<tr>
           <td align="center" style="padding-bottom:14px;">
             <a href="${safeURL(comUtm(item.url, utmContent))}" target="_blank" style="text-decoration:none;"><img src="${safeURL(item.imagem)}" alt="${esc(item.categoria || 'Notícia')}" width="536" height="300" style="display:block;width:100%;max-width:536px;height:300px;object-fit:cover;border:0;margin:0 auto;" /></a>
           </td>
-        </tr>
+        </tr>`}
         <tr>
           <td align="center" style="text-align:center;">
             <div style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:11px;font-weight:700;color:#f15a22;letter-spacing:0.16em;text-transform:uppercase;margin-bottom:8px;">
@@ -111,84 +119,74 @@ export function montarAssunto(tituloEdicao) {
   return t + SUFIXO_ASSUNTO;
 }
 
-export function montarHTML(dados, opts = {}) {
-  let selecionados, cta, blog;
-  try { selecionados = JSON.parse(dados.json_artigos_principais); } catch (e) { throw new Error('Falha parsear json_artigos_principais: ' + e.message); }
-  try { cta = JSON.parse(dados.json_cta); } catch (e) { throw new Error('Falha parsear json_cta: ' + e.message); }
-  try { blog = JSON.parse(dados.json_blog); } catch (e) { throw new Error('Falha parsear json_blog: ' + e.message); }
+// Texto aprovado pelo Yago no exemplo da news segmentada (2026-10-22).
+export const LINHA_IDENTIDADE_CLIENTE =
+  "Você recebe a Let's Insights por ser cliente Let's. Curadoria semanal do que muda na operação do seu setor.";
 
+// Itens na ordem do e-mail. Versão (json_itens) já vem pronta; a linha de
+// edicoes é blog + artigos.
+function itensDaEdicao(dados) {
+  if (dados.json_itens) {
+    let itens;
+    try { itens = JSON.parse(dados.json_itens); } catch (e) { throw new Error('Falha parsear json_itens: ' + e.message); }
+    if (!Array.isArray(itens) || !itens.some((i) => i.tipo !== 'blog')) throw new Error('Versão sem artigos');
+    return itens;
+  }
+  let selecionados, blog;
+  try { selecionados = JSON.parse(dados.json_artigos_principais); } catch (e) { throw new Error('Falha parsear json_artigos_principais: ' + e.message); }
+  try { blog = JSON.parse(dados.json_blog); } catch (e) { throw new Error('Falha parsear json_blog: ' + e.message); }
   if (!Array.isArray(selecionados) || selecionados.length === 0) throw new Error('Edição sem artigos selecionados');
   if (!blog || !blog.titulo) throw new Error('Edição sem destaque de blog');
+  return [{ ...blog, tipo: 'blog' }, ...selecionados.map((a) => ({ ...a, tipo: a.tipo || 'noticia' }))];
+}
 
-  // Teste A/B de posição do CTA (opts.ctaPosicao: 'inicio' | 'meio' | 'fim',
-  // default 'fim' = comportamento original). Cada posição exige um texto
-  // diferente porque a quantidade de conteúdo já "lido" quando o CTA aparece
-  // muda: 'inicio' não pode referenciar nenhum artigo (nada foi mostrado
-  // ainda, precisa ser pitch genérico da empresa); 'meio' pode referenciar
-  // só os 2 primeiros itens (blog + 1º artigo); 'fim' pode referenciar a
-  // edição inteira (comportamento normal, texto vem do json_cta da IA).
-  // opts.ctaOverride injeta a copy quando não é 'fim'.
-  const ctaPosicao = opts.ctaPosicao || 'fim';
-  const ctaConteudo = opts.ctaOverride || cta;
-  const ctaComKicker = ctaPosicao !== 'inicio'; // sem conteúdo anterior, não há "troca de registro" pra marcar
-  const botaoMaior = ctaPosicao === 'inicio';
+export function montarHTML(dados, opts = {}) {
+  const itens = itensDaEdicao(dados);
+  let cta = null;
+  if (!opts.semCta) {
+    try { cta = JSON.parse(dados.json_cta); } catch (e) { throw new Error('Falha parsear json_cta: ' + e.message); }
+  }
 
   const preHeader = dados.pre_header || '';
 
-  const itens = [blog, ...selecionados];
-  const renderSubset = (de, ate) =>
-    itens
-      .slice(de, ate)
-      .map((item, i) => {
-        const idx = de + i;
-        return renderItem(item, idx === itens.length - 1, idx, idx === 0);
-      })
-      .join('');
+  const itensHTML = itens.map((item, idx) => renderItem(item, idx === itens.length - 1, idx)).join('');
 
-  const botaoFontSize = botaoMaior ? '16px' : '13px';
-  const botaoPadding = botaoMaior ? '20px 44px' : '16px 32px';
-  const botaoAlturaMso = botaoMaior ? '60px' : '52px';
-  const botaoLarguraMso = botaoMaior ? '360px' : '320px';
-
-  // Espaço depois do bloco de CTA: 'inicio' segue reto pro 1º item (só um
-  // respiro pequeno); 'meio' volta pro clima editorial com um divisor laranja
-  // igual ao dos itens; 'fim' é o espaçador branco original antes do rodapé.
-  const espacoDepoisCTA =
-    ctaPosicao === 'inicio'
-      ? `<tr><td style="height:8px;font-size:0;line-height:0;background-color:#ffffff;">&nbsp;</td></tr>`
-      : ctaPosicao === 'meio'
-        ? `<tr><td style="padding:0 40px 24px;background-color:#ffffff;"><table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%"><tr><td style="border-top:1px solid #f15a22;font-size:0;line-height:0;">&nbsp;</td></tr></table></td></tr>`
-        : `<tr><td style="height:24px;font-size:0;line-height:0;background-color:#ffffff;">&nbsp;</td></tr>`;
-
-  const ctaBlockHTML = `
+  const ctaBlockHTML = !cta ? '' : `
           <tr>
             <td bgcolor="#ffffff" class="dm-editorial-bg" style="background-color:#ffffff;padding:36px 40px 40px;text-align:center;" align="center">
-              ${!ctaComKicker ? '' : `<div class="dm-text-muted" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:11px;font-weight:700;color:#a09ca2;letter-spacing:0.16em;text-transform:uppercase;margin-bottom:10px;">
+              <div class="dm-text-muted" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:11px;font-weight:700;color:#a09ca2;letter-spacing:0.16em;text-transform:uppercase;margin-bottom:10px;">
                 Let's
-              </div>`}
+              </div>
               <div class="dm-text-primary" style="font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-weight:700;font-size:20px;line-height:1.25;color:#12100b;letter-spacing:-0.01em;margin-bottom:14px;max-width:460px;margin-left:auto;margin-right:auto;">
-                ${esc(ctaConteudo.titulo)}
+                ${esc(cta.titulo)}
               </div>
               <p class="dm-text-body" style="margin:0 auto 24px;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:13.5px;line-height:1.6;color:#2f323b;max-width:460px;">
-                ${esc(ctaConteudo.texto || '')}
+                ${esc(cta.texto || '')}
               </p>
               <!--[if mso]>
-              <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${CTA_URL}" style="height:${botaoAlturaMso};v-text-anchor:middle;width:${botaoLarguraMso};" arcsize="8%" stroke="f" fillcolor="#f15a22"><w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI, Arial, sans-serif;font-size:${botaoFontSize};font-weight:bold;letter-spacing:1px">FALAR COM ESPECIALISTA</center></v:roundrect>
+              <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${CTA_URL}" style="height:52px;v-text-anchor:middle;width:320px;" arcsize="8%" stroke="f" fillcolor="#f15a22"><w:anchorlock/><center style="color:#ffffff;font-family:Segoe UI, Arial, sans-serif;font-size:13px;font-weight:bold;letter-spacing:1px">FALAR COM ESPECIALISTA</center></v:roundrect>
               <![endif]-->
               <!--[if !mso]><!-- -->
-              <a href="${CTA_URL}" target="_blank" style="background-color:#f15a22;color:#ffffff;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:${botaoFontSize};font-weight:700;letter-spacing:0.08em;text-transform:uppercase;text-decoration:none;padding:${botaoPadding};border-radius:3px;display:inline-block;mso-hide:all;">FALAR COM ESPECIALISTA</a>
+              <a href="${CTA_URL}" target="_blank" style="background-color:#f15a22;color:#ffffff;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:13px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;text-decoration:none;padding:16px 32px;border-radius:3px;display:inline-block;mso-hide:all;">FALAR COM ESPECIALISTA</a>
               <!--<![endif]-->
             </td>
           </tr>
-          ${espacoDepoisCTA}
+          <tr><td style="height:24px;font-size:0;line-height:0;background-color:#ffffff;">&nbsp;</td></tr>
   `;
 
-  const corpoHTML =
-    ctaPosicao === 'inicio'
-      ? `${ctaBlockHTML}${renderSubset(0, itens.length)}`
-      : ctaPosicao === 'meio'
-        ? `${renderSubset(0, 2)}${ctaBlockHTML}${renderSubset(2, itens.length)}`
-        : `${renderSubset(0, itens.length)}${ctaBlockHTML}`;
+  // Linha de identidade (versões para clientes), no lugar do CTA. Mesmo
+  // bloco do exemplo aprovado (exemplo-news-segmentada-mineracao.html).
+  const identidadeHTML = !opts.linhaIdentidade ? '' : `
+          <tr>
+            <td bgcolor="#ffffff" class="dm-body-bg" style="background-color:#ffffff;padding:28px 48px 32px;text-align:center;" align="center">
+              <p class="dm-text-muted" style="margin:0 auto;max-width:440px;font-family:'Open Sans','Segoe UI',Arial,sans-serif;font-size:12.5px;line-height:1.6;color:#6b6870;">
+                ${esc(opts.linhaIdentidade)}
+              </p>
+            </td>
+          </tr>
+  `;
+
+  const corpoHTML = `${itensHTML}${ctaBlockHTML}${identidadeHTML}`;
 
   const html_final = `<!doctype html>
 <html lang="pt-BR" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">

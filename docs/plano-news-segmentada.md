@@ -1,6 +1,6 @@
 # Let's Insights segmentada: desenho do pipeline
 
-Status: **proposta para aprovação do Yago** (2026-10-22). Nada disto está implementado.
+Status: aprovado pelo Yago em 2026-10-22. Passo 1 (coleta) em produção; passo 2 (WF-02 e WF-03) implementado em nov/2026, ver `CLAUDE.md`. Falta a semana de ensaio.
 
 ## Objetivo
 

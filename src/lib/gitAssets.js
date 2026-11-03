@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { git } from './gitBin.js';
+import { config } from './config.js';
 
 // ─────────────────────────────────────────────────────────────
 // Hospeda imagens geradas (ver lib/imagegen.js) commitando-as no próprio
@@ -17,13 +18,19 @@ const DIR = 'public/generated';
 export function commitarImagensGeradas(arquivos, mensagem) {
   if (!arquivos.length) return {};
 
-  const dirAbs = path.join(process.cwd(), DIR);
+  // Modo de teste: grava as imagens fora do repo e não commita. As URLs
+  // devolvidas são as que existiriam em produção (não abrem localmente).
+  const dirAbs = config.modoTeste ? path.join(config.testeDir, 'imagens') : path.join(process.cwd(), DIR);
   fs.mkdirSync(dirAbs, { recursive: true });
 
   const urls = {};
   for (const { nomeArquivo, buffer } of arquivos) {
     fs.writeFileSync(path.join(dirAbs, nomeArquivo), buffer);
     urls[nomeArquivo] = `https://raw.githubusercontent.com/${REPO}/${BRANCH}/${DIR}/${nomeArquivo}`;
+  }
+  if (config.modoTeste) {
+    console.log(`[MODO TESTE] ${arquivos.length} imagem(ns) gravada(s) em ${dirAbs}, sem commit.`);
+    return urls;
   }
 
   git(['config', 'user.name', 'Lets Insights Bot']);

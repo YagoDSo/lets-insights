@@ -12,6 +12,13 @@
 // montar o HTML (sem persistir, sem passar pela IA), foi movido pra cá
 // pra a IA poder escrever um título/resumo de verdade sobre o post, em
 // vez de só reaproveitar o título bruto extraído por regex.
+//
+// nov/2026: news segmentada (ver docs/plano-news-segmentada.md). A curadoria
+// cura 7 listas numa chamada (geral, Brasil e 5 segmentos); a validação de
+// link/imagem, o Gemini e a re-hospedagem rodam uma vez sobre a união; o
+// código distribui os artigos nas versões (distribuirArtigos); a redação
+// escreve cada artigo uma vez e o assunto/pré-header de cada versão. Grava
+// a versão geral em edicoes (como antes) e as 7 versões em edicoes_versoes.
 // ════════════════════════════════════════════════════════════
 import { config, requireEnv } from './lib/config.js';
 import { lerAba, upsertLinhas, commitarBanco } from './lib/db.js';
@@ -208,17 +215,42 @@ async function validarURL(url, tentativas = 2) {
 // status 0 (rede) = mantém; >=400 = descarta.
 const deveDescartar = (r) => (r.status === 0 ? false : r.status >= 400);
 
+// ─── News segmentada (nov/2026, ver docs/plano-news-segmentada.md) ──────
+// 7 versões por semana: geral comercial (listas 34/69, com botão), geral
+// clientes (lista 67 fora dos 5 segmentos, sem botão) e 5 segmentadas (lista
+// 67). As duas gerais têm o mesmo conteúdo; muda só o rodapé (ver template.js).
+// Cada segmentada tem 5 itens: notícia do segmento, blog, notícia do segmento,
+// notícia Brasil, notícia Brasil (as 2 do Brasil são as mesmas nas 5).
+const SEGMENTOS = ['mineracao', 'industria', 'engenharia', 'tecnologia', 'florestal'];
+const NOME_SEGMENTO = {
+  mineracao: 'Mineração e siderurgia',
+  industria: 'Indústria e manufatura',
+  engenharia: 'Engenharia e construção',
+  tecnologia: 'Tecnologia e telecom',
+  florestal: 'Florestal e celulose',
+};
+const ROTULO_TEMA_BRASIL = { Economia: 'Economia', Regulacao: 'Regulação', Negocios: 'Negócios', Operacao: 'Operação' };
+const ITENS_VERSAO_SEGMENTADA = 5;
+
 // ─── Prompts (verbatim do PROD-WF-02; carregam as regras de negócio) ──
-function promptCuradoria(artigos) {
+// nov/2026: uma chamada só para os 7 pools (geral, Brasil e os 5 segmentos).
+// Cada artigo tem um "id"; a resposta devolve só ids, e url/fonte/imagem
+// voltam do banco em código (a IA não tem como inventar link).
+function promptCuradoria(pools) {
+  const blocoPool = (chave) => JSON.stringify(pools[chave], null, 2);
   return `Você é o editor de uma newsletter B2B voltada para o público-alvo (ICP) da Let's (gestão de frotas do Grupo Águia Branca): empresas de médio/grande porte com 3 a 35 veículos em operação de campo contínua e terreno adverso (pickup 4x4, utilitários).
 
 Setores prioritários: Engenharia/Geotecnia, Mineração, Meio Ambiente.
 Setores secundários: Concessão de Rodovias, Obras/Montagem Industrial, Florestal/Celulose, Infraestrutura, Siderurgia.
 Quem lê: Gestor de Frota, Coordenador de Campo, QSMS, Engenheiro de Campo (influenciadores) e Diretor de Operações/Administrativo, Gerente Geral (decisores).
 
+A newsletter sai em várias versões nesta semana. Você vai curar SETE listas, cada uma a partir do seu próprio pool de artigos (abaixo). Cada artigo tem um "id"; responda só com ids que existem no pool daquela lista.
+
+═══ LISTA 1: "geral" (versão geral, todos os leitores) ═══
+
 DORES QUE ATIVAM (priorize artigos que tocam nisso): manutenção corretiva imprevisível comendo margem; veículo barrado por laudo/RAC2 vencido; carga de gerir implementação e documentação da frota; atendimento sem solução real; veículo parado em campo como risco de segurança; pickup fora da norma da operação.
 
-Avalie cada artigo e selecione os 6 mais relevantes seguindo:
+Avalie cada artigo do POOL GERAL e selecione os 6 mais relevantes seguindo:
 1. RELEVÂNCIA PRA OPERAÇÃO DE CAMPO (40%): o artigo fala de TCO, RAC2/compliance e laudos, manutenção preventiva vs corretiva, gestão de frota em operação severa, ou de algum dos setores prioritários/secundários acima?
 2. ATUALIDADE (20%): Quanto mais recente, melhor
 3. AUTORIDADE DA FONTE (20%): Fontes especializadas valem mais
@@ -232,14 +264,37 @@ REGRA DE DIVERSIDADE DE TEMA (CRÍTICA): cada artigo tem um campo "tema". Entre 
 
 IMPORTANTE: ordene os 6 selecionados pelo score (do maior pro menor), MAS respeitando a diversidade de tema nos 3 primeiros. Atribua scores diferenciados. As posições 3, 4 e 5 (as três últimas) são reserva (backup) — coloque aí os 3 melhores artigos que sobrarem (de fontes/temas ainda dentro do limite de diversidade), caso algum dos 3 primeiros seja descartado depois por falha de link.
 
-Retorne APENAS JSON válido (sem markdown), ordenado por score decrescente:
-{"selecionados": [{"titulo_original": "...", "url": "...", "fonte": "...", "data": "...", "tema": "...", "score": 0-10, "justificativa": "...", "categoria": "Análise|Renovação de frota|Regulação|Tecnologia|Carbono|Sazonalidade|Mercado"}]}
+═══ LISTA 2: "brasil" (notícias gerais do Brasil, entram em todas as versões por setor) ═══
 
-ARTIGOS:
-${JSON.stringify(artigos, null, 2)}`;
+Do POOL BRASIL, selecione 4 artigos (2 que entram + 2 reservas), ordenados por score. São as notícias da semana sobre economia, regulação, negócios e operação no Brasil que mais importam pra um gestor de empresa com operação de campo: juros, câmbio, combustível, lei/norma que muda a rotina da empresa, grande investimento ou movimento de mercado, logística e energia. Os 2 primeiros têm que ser de temas DIFERENTES entre si (o campo "tema" é Economia, Regulacao, Negocios ou Operacao) e de fontes diferentes. Descarte política partidária ou eleitoral, crime, esporte, celebridade, e notícia de mercado financeiro sem efeito na operação (cotação do dia, recomendação de ação).
+
+═══ LISTAS 3 a 7: uma por setor (versões enviadas a clientes da Let's desse setor) ═══
+
+Para cada setor, do POOL DAQUELE SETOR, selecione 4 artigos (2 que entram + 2 reservas), ordenados por score. O leitor é cliente da Let's e trabalha nesse setor: priorize o que muda a operação, o investimento, a regulação ou o mercado do setor no Brasil (obra, mina, fábrica, rede, floresta), mesmo que não fale de frota. Descarte release de produto sem impacto, evento/feira, nota institucional, conteúdo internacional sem efeito no Brasil e qualquer artigo com foco central em preço. Os 2 primeiros de cada setor têm que ser de fontes diferentes. Se o pool do setor tiver menos artigos bons do que o pedido, devolva menos: nunca complete com artigo fraco ou fora do setor (o código completa com notícia geral).
+
+═══ REGRAS QUE VALEM PRAS 7 LISTAS ═══
+- Um artigo NÃO pode aparecer em duas listas. Se um artigo serve a duas, deixe-o na lista onde ele é mais forte.
+- Concorrentes (Localiza, Movida, Unidas, Vamos, Ouro Verde, ALD, Arval) não podem ser protagonistas.
+- Scores diferenciados, de 0 a 10. Ordene cada lista do maior pro menor score.
+- categoria: 1-2 palavras (Análise, Renovação de frota, Regulação, Tecnologia, Carbono, Sazonalidade, Mercado, Investimento, Operação...).
+
+Retorne APENAS JSON válido (sem markdown), no formato:
+{"geral": [{"id": 0, "score": 0-10, "justificativa": "...", "categoria": "..."}], "brasil": [...], "mineracao": [...], "industria": [...], "engenharia": [...], "tecnologia": [...], "florestal": [...]}
+
+POOL GERAL:
+${blocoPool('geral')}
+
+POOL BRASIL:
+${blocoPool('brasil')}
+
+${SEGMENTOS.map((s) => `POOL ${NOME_SEGMENTO[s].toUpperCase()} (lista "${s}"):\n${blocoPool(s)}`).join('\n\n')}`;
 }
 
-function promptRedacao(selecionados, blogRaw) {
+function promptRedacao(artigosParaEscrever, versoes, blogRaw) {
+  const descreverVersao = (v) => {
+    const itens = v.itens.map((it, i) => `${i + 1}. ${it.tipo === 'blog' ? 'destaque do blog' : `artigo id ${it.id}`}`).join('; ');
+    return `- "${v.versao}" (${v.descricao}): ${itens}`;
+  };
   return `Você é o redator-chefe da newsletter 'Let's Insights', uma publicação semanal B2B da Let's (gestão de frotas do Grupo Águia Branca) voltada para gestores de frota, coordenadores de campo, QSMS, engenheiros de campo e diretores de operações de empresas com frotas 4x4 em operação de campo (Engenharia/Geotecnia, Mineração, Meio Ambiente, Concessão de Rodovias, Obras/Montagem Industrial, Florestal/Celulose, Infraestrutura, Siderurgia).
 
 TOM DE VOZ (guia oficial da marca, siga à risca):
@@ -259,21 +314,14 @@ REFERÊNCIA DE ESTRUTURA DE FRASE: Brazil Journal. O título não é uma manchet
 
 REGRAS DE COPYRIGHT (CRÍTICO): NUNCA copie trechos literais dos artigos de terceiros. SEMPRE parafraseie. Cite a fonte ao final. (Não se aplica ao destaque do blog Lets abaixo — é conteúdo próprio da marca.)
 
-REGRA DE DIVERSIDADE EDITORIAL (CRÍTICA): ao escolher os 3 artigos, NENHUMA fonte pode se repetir — cada um vem de uma fonte diferente. (Não se aplica ao destaque do blog Lets, que não concorre com essa diversidade.)
+ESTA SEMANA A NEWSLETTER SAI EM VÁRIAS VERSÕES (uma geral e uma por setor). Os artigos de cada versão JÁ foram escolhidos e validados (link e imagem conferidos); você não escolhe nem descarta nenhum. Cada artigo aparece numa lista única abaixo, com um "id", e é escrito UMA VEZ SÓ: o mesmo título serve em todas as versões em que ele aparece. Escreva um título para CADA artigo da lista, sem pular nenhum.
 
-REGRA DE DIVERSIDADE DE TEMA (CRÍTICA): cada artigo tem um campo "tema". Os 3 escolhidos devem ser de 3 temas DISTINTOS entre si (nunca 2 do mesmo tema). Se receber muitos artigos do mesmo tema, use o melhor e descarte os demais repetidos de tema, preferindo variedade. Variedade temática é mais importante que pequenas diferenças de score.
-
-REGRA CRÍTICA DE INTEGRIDADE DE DADOS: você DEVE preservar EXATAMENTE como recebidos os campos url, fonte e imagem de cada artigo. NUNCA invente, modifique, encurte ou abrevie URLs. NUNCA troque URLs entre artigos. Esta regra é INVIOLÁVEL.
-
-Você vai receber uma lista de artigos JÁ validados (link e imagem conferidos), ordenados por score (do maior pro menor). IMPORTANTE: nem sempre a lista terá 6 artigos — alguns dos que a curadoria escolheu podem ter sido descartados nessa validação por link morto ou erro temporário do site de origem, então você pode receber menos itens do que o esperado. NUNCA invente um artigo pra completar uma quantidade "ideal": use só o que está na lista.
-
-ARTIGOS SELECIONADOS: escolha os 3 melhores artigos da lista (respeitando as regras de diversidade de fonte/tema acima). Se sobrar menos de 3 na lista, gere só os que existirem — não invente um a mais.
 Para CADA artigo, gere:
-- categoria (1-2 palavras, ex: "Análise", "Pesados", "Leves", "Regulação", "Renovação de frota")
-- titulo (MÁX 140 caracteres, DE VERDADE curto — isso é o registro rápido do Brazil Journal, não o do blog abaixo: UMA cláusula só, sem emendar uma segunda cláusula elaborada. Frase única no estilo Brazil Journal — ver REFERÊNCIA DE ESTRUTURA DE FRASE acima: fato principal + no máximo UM dado concreto e a implicação pra operação de campo, tudo na mesma frase curta, sem travessão; parafraseado, nunca copie o título original)
-- MANTENHA url, fonte e imagem EXATAMENTE como vieram
+- id (o mesmo recebido)
+- categoria (1-2 palavras, ex: "Análise", "Pesados", "Leves", "Regulação", "Renovação de frota", "Investimento")
+- titulo (MÁX 140 caracteres, DE VERDADE curto — isso é o registro rápido do Brazil Journal, não o do blog abaixo: UMA cláusula só, sem emendar uma segunda cláusula elaborada. Frase única no estilo Brazil Journal — ver REFERÊNCIA DE ESTRUTURA DE FRASE acima: fato principal + no máximo UM dado concreto e a implicação pra operação, tudo na mesma frase curta, sem travessão; parafraseado, nunca copie o título original). Nos artigos de setor e do Brasil, a implicação é pra operação ou pro negócio de quem trabalha naquele setor, não necessariamente pra frota: não force um gancho de frota que o artigo não tem.
 
-DESTAQUE DO BLOG LETS (ÚNICO item com esse tratamento — os 3 artigos acima ficam curtos e rápidos, isso aqui é a exceção): abaixo vêm o título e o texto completo do post mais recente do blog institucional da Let's — conteúdo próprio da marca, não precisa de regra de diversidade nem de copyright, e AQUI a regra é diferente da dos artigos externos: em vez de uma frase-fato compacta, quero uma chamada mais detalhada e persuasiva, que dê vontade de clicar. Gere:
+DESTAQUE DO BLOG LETS (ÚNICO item com esse tratamento — os artigos acima ficam curtos e rápidos, isso aqui é a exceção): abaixo vêm o título e o texto completo do post mais recente do blog institucional da Let's — conteúdo próprio da marca, não precisa de regra de copyright, e AQUI a regra é diferente da dos artigos externos: em vez de uma frase-fato compacta, quero uma chamada mais detalhada e persuasiva, que dê vontade de clicar. Gere:
 - categoria: sempre "Blog Lets"
 - titulo (MÁX 260 caracteres; leia o texto completo do post abaixo e garimpe o que tem de mais concreto e curioso — números específicos, estatística inesperada, detalhe que a maioria não imagina, contraste chamativo — e construa uma frase (ou duas, ligadas por dois-pontos/ponto e vírgula, nunca travessão) que venda o clique com esse gancho, não um resumo burocrático do assunto. Ainda no tom da marca — nada de superlativo vazio ("incrível", "imperdível") nem clickbait vazio; a curiosidade tem que vir de um fato real do texto, não de suspense artificial)
 
@@ -285,9 +333,9 @@ Post do blog:
 Título: ${blogRaw?.titulo || '(sem título disponível)'}
 Texto completo do artigo: ${blogRaw?.textoCompleto || blogRaw?.descricao || '(sem texto disponível, baseie-se só no título)'}
 
-Gere também:
+Gere também, PARA CADA VERSÃO listada em VERSÕES abaixo, um título da edição e um pré-header:
 
-1. TÍTULO DA EDIÇÃO: uma manchete única, sobre o destaque mais forte desta edição. Escolha UMA das estruturas abaixo (A, B, ou a pergunta ancorada opcional) — a que render o gancho mais forte pro fato desta edição especificamente, não sempre a mesma:
+1. TÍTULO DA EDIÇÃO (titulo_edicao): uma manchete única. Na versão "geral", sobre o destaque mais forte da versão; nas versões de setor, a partir do PRIMEIRO artigo da versão (a notícia de abertura do setor). Escolha UMA das estruturas abaixo (A, B, ou a pergunta ancorada opcional) — a que render o gancho mais forte pro fato daquela versão especificamente, não sempre a mesma:
 
    ESTRUTURA A — Afirmativa (padrão, use quando não houver uma reviravolta clara)
    - Máx 45 caracteres (o ponto ideal fica entre 30 e 42)
@@ -296,112 +344,112 @@ Gere também:
    - Formato certo: "Lei 15.485 aperta cadastro de motorista" / "Pesagem em movimento chega à BR-040" / "Biodiesel a 15% derruba desempenho"
 
    ESTRUTURA B — Contraste (duas orações curtas: afirma, depois vira a mesa)
-   - Use só quando os artigos selecionados sustentarem uma tensão real (ex: um fato positivo com um "mas" concreto, ou uma solução com uma lacuna) — nunca force um contraste que o conteúdo não tem
+   - Use só quando os artigos sustentarem uma tensão real (ex: um fato positivo com um "mas" concreto, ou uma solução com uma lacuna) — nunca force um contraste que o conteúdo não tem
    - Máx 65 caracteres no total, cada oração curta (a segunda pode ser só 2-4 palavras)
    - Formato certo: "Biodiesel a 15% já é lei. Poucas frotas estão prontas" / "Fiscalização de RAC2 aumentou. Renovação ainda demora"
 
    Independente da estrutura escolhida, valem SEMPRE estas regras:
    - NUNCA escreva "Let's Insights" em lugar nenhum do título: o sufixo da marca é acrescentado depois, em código
+   - NUNCA escreva o nome do setor como rótulo ("Mineração: ...", "Edição Indústria"): o leitor não deve perceber que recebeu uma versão segmentada
    - Prefira âncora concreta a termo genérico: número, sigla, nome próprio ou percentual quando existir ("Lei 15.485", "BR-040", "biodiesel a 15%") ganham de "regulação" ou "combustível". Quando houver um número ou percentual forte disponível, ele deve ser o CENTRO da frase (o que o leitor lembra depois), não um detalhe posto de lado
    - Sem travessão, sem dois-pontos de rótulo ("Regulação: ..."), sem ponto final, sem aspas
    - Formato errado: "Let's Insights · Biodiesel e compliance" (marca na frente) / "Regulação e custos" (genérico, sem fato) / "Novidades do setor de frotas" (vazio)
 
    OPCIONAL — pergunta ancorada ("por quê"), em vez de afirmação direta:
-   - Só use se a pergunta for sobre um fato ESPECÍFICO desta edição, nunca genérica ("Por que isso muda tudo?" é proibido — não diz nada que não sirva pra qualquer edição)
+   - Só use se a pergunta for sobre um fato ESPECÍFICO daquela versão, nunca genérica ("Por que isso muda tudo?" é proibido — não diz nada que não sirva pra qualquer edição)
    - A resposta tem que vir de fato no corpo do e-mail (a manchete não pode prometer um "porquê" que o texto não desenvolve)
    - Mesmo limite de caracteres da Estrutura A
    - Formato certo: "Por que a Lei 15.485 aperta prazo de motorista" / "Por que biodiesel a 15% derruba desempenho"
    - Formato errado: "Por que isso é importante?" / "Por que você precisa saber disso?" (suspense vazio, sem âncora)
 
-2. PRÉ-HEADER (máx 90 caracteres, vira preview no inbox)
+2. PRÉ-HEADER (pre_header, máx 90 caracteres, vira preview no inbox): complementa o título com os outros assuntos daquela versão. Não repita o título.
+
+Gere também, só para a versão "geral":
 
 3. CTA_FINAL (chamada pra falar com especialista Let's)
-   - ANTES de escrever, releia os 3 artigos e o destaque do blog que você selecionou acima. Identifique qual dor operacional de campo domina ESTA edição especificamente (pode ser documentação/compliance, manutenção, disponibilidade de veículo, tecnologia, regulação ambiental, custo, ou outra — depende do que você mesmo selecionou, não de um exemplo fixo).
+   - ANTES de escrever, releia os artigos e o destaque do blog da versão "geral". Identifique qual dor operacional de campo domina ESSA versão especificamente (pode ser documentação/compliance, manutenção, disponibilidade de veículo, tecnologia, regulação ambiental, custo, ou outra — depende dos artigos, não de um exemplo fixo).
    - titulo (pergunta provocativa ancorada NESSA dor específica da edição; NUNCA sobre preço, máx 60 chars)
    - texto (2 frases sobre a operação: veículo pronto pra operar, consultor dedicado, documentação/laudos resolvidos; sem falar de preço)
    - botao (texto do botão, ex: "FALAR COM ESPECIALISTA")
-   - VARIAÇÃO OBRIGATÓRIA: não repita sempre o mesmo gancho de "laudo/RAC2 vencido" só porque é um exemplo comum de outras edições — o gancho deve mudar conforme o tema real dos artigos selecionados nesta chamada.
+   - VARIAÇÃO OBRIGATÓRIA: não repita sempre o mesmo gancho de "laudo/RAC2 vencido" só porque é um exemplo comum de outras edições — o gancho deve mudar conforme o tema real dos artigos.
+
+VERSÕES (itens na ordem do e-mail):
+${versoes.map(descreverVersao).join('\n')}
 
 Retorne APENAS JSON válido (sem markdown):
 {
-  "titulo_edicao": "...",
-  "pre_header": "...",
-  "artigos_selecionados": [
-    {"categoria": "...", "titulo": "...", "url": "...", "fonte": "...", "imagem": "..."}
-  ],
+  "artigos": [{"id": 0, "categoria": "...", "titulo": "..."}],
   "blog": {"categoria": "Blog Lets", "titulo": "..."},
+  "versoes": {${versoes.map((v) => `"${v.versao}": {"titulo_edicao": "...", "pre_header": "..."}`).join(', ')}},
   "cta_final": {"titulo": "...", "texto": "...", "botao": "..."}
 }
 
-ARTIGOS (ordenados por score):
-${JSON.stringify(
-  // score/justificativa/posicao são metadado interno da curadoria — a redação
-  // não usa nenhum dos três (não estão no formato de saída pedido acima) e
-  // são só tokens de input desperdiçados nesta chamada.
-  selecionados.map(({ score, justificativa, posicao, ...resto }) => resto),
-  null,
-  2,
-)}`;
+ARTIGOS:
+${JSON.stringify(artigosParaEscrever, null, 2)}`;
 }
 
-// A redação principal às vezes deixa vaga sem motivo (falha de
-// instruction-following do modelo) mesmo havendo candidato validado e sem
-// conflito de fonte/tema disponível. Em vez de publicar a edição capenga,
-// completa com uma chamada avulsa focada só nesse artigo.
 // ─── Formatos de resposta (saída estruturada, out/2026) ──────
 // Espelham exatamente os JSON pedidos nos prompts acima. Com eles a API só
 // devolve um JSON válido nesse formato, sem texto antes ou depois.
 const STR = { type: 'string' };
+const ITEM_CURADORIA = {
+  type: 'array',
+  items: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['id', 'score', 'justificativa', 'categoria'],
+    properties: { id: { type: 'integer' }, score: { type: 'number' }, justificativa: STR, categoria: STR },
+  },
+};
+const LISTAS_CURADORIA = ['geral', 'brasil', ...SEGMENTOS];
 const SCHEMA_CURADORIA = {
   type: 'object',
   additionalProperties: false,
-  required: ['selecionados'],
-  properties: {
-    selecionados: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['titulo_original', 'url', 'fonte', 'data', 'tema', 'score', 'justificativa', 'categoria'],
-        properties: {
-          titulo_original: STR, url: STR, fonte: STR, data: STR, tema: STR,
-          score: { type: 'number' }, justificativa: STR, categoria: STR,
+  required: LISTAS_CURADORIA,
+  properties: Object.fromEntries(LISTAS_CURADORIA.map((l) => [l, ITEM_CURADORIA])),
+};
+// A lista de versões muda de semana pra semana (versão sem artigo suficiente
+// não vai pra redação), então o formato é montado na hora.
+function schemaRedacao(chavesVersoes) {
+  const VERSAO = {
+    type: 'object', additionalProperties: false, required: ['titulo_edicao', 'pre_header'],
+    properties: { titulo_edicao: STR, pre_header: STR },
+  };
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['artigos', 'blog', 'versoes', 'cta_final'],
+    properties: {
+      artigos: {
+        type: 'array',
+        items: {
+          type: 'object', additionalProperties: false, required: ['id', 'categoria', 'titulo'],
+          properties: { id: { type: 'integer' }, categoria: STR, titulo: STR },
         },
       },
-    },
-  },
-};
-const SCHEMA_REDACAO = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['titulo_edicao', 'pre_header', 'artigos_selecionados', 'blog', 'cta_final'],
-  properties: {
-    titulo_edicao: STR,
-    pre_header: STR,
-    artigos_selecionados: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['categoria', 'titulo', 'url', 'fonte', 'imagem'],
-        properties: { categoria: STR, titulo: STR, url: STR, fonte: STR, imagem: { type: ['string', 'null'] } },
+      blog: {
+        type: 'object', additionalProperties: false, required: ['categoria', 'titulo'],
+        properties: { categoria: STR, titulo: STR },
+      },
+      versoes: {
+        type: 'object', additionalProperties: false, required: chavesVersoes,
+        properties: Object.fromEntries(chavesVersoes.map((k) => [k, VERSAO])),
+      },
+      cta_final: {
+        type: 'object', additionalProperties: false, required: ['titulo', 'texto', 'botao'],
+        properties: { titulo: STR, texto: STR, botao: STR },
       },
     },
-    blog: {
-      type: 'object', additionalProperties: false, required: ['categoria', 'titulo'],
-      properties: { categoria: STR, titulo: STR },
-    },
-    cta_final: {
-      type: 'object', additionalProperties: false, required: ['titulo', 'texto', 'botao'],
-      properties: { titulo: STR, texto: STR, botao: STR },
-    },
-  },
-};
+  };
+}
 const SCHEMA_ARTIGO_AVULSO = {
   type: 'object', additionalProperties: false, required: ['categoria', 'titulo'],
   properties: { categoria: STR, titulo: STR },
 };
 
+// A redação às vezes deixa artigo sem título (falha de instruction-following
+// do modelo). Em vez de publicar a versão capenga, completa com uma chamada
+// avulsa focada só nesse artigo.
 function promptArtigoAvulso(artigo, resumoOriginal) {
   return `Você é o redator-chefe da newsletter 'Let's Insights', B2B da Let's (gestão de frotas do Grupo Águia Branca) voltada pra gestores de frota, coordenadores de campo, QSMS e engenheiros de campo em operação com veículos 4x4.
 
@@ -416,53 +464,74 @@ Retorne APENAS JSON válido (sem markdown):
 {"categoria": "1-2 palavras, ex: Regulação, Tecnologia, Carbono", "titulo": "máx 140 caracteres, curto e rápido; UMA frase única com no máximo uma cláusula extra (dado concreto + implicação), nunca duas; nunca travessão"}`;
 }
 
-// Completa a lista de selecionados se sobrar vaga após a redação principal,
-// usando os candidatos validados (posições 0-2 primeiro; backups 3-5 só
-// como último recurso) que ainda não foram usados, respeitando as mesmas
-// regras de diversidade (sem tema repetido, sem fonte repetida no total).
-async function completarSelecionados(selecionados, validados, mapaResumos) {
-  const MAX = 3;
-  if (selecionados.length >= MAX) return selecionados;
+// Roda fn sobre a lista com no máximo `limite` chamadas ao mesmo tempo,
+// mantendo a ordem do resultado.
+async function mapLimitado(lista, limite, fn) {
+  const resultado = new Array(lista.length);
+  let proximo = 0;
+  const trabalhador = async () => {
+    while (proximo < lista.length) {
+      const k = proximo++;
+      resultado[k] = await fn(lista[k], k);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limite, lista.length) }, trabalhador));
+  return resultado;
+}
 
-  const usados = new Set(selecionados.map((a) => a.url));
-  const mapaTemaPorUrl = {};
-  validados.forEach((v) => (mapaTemaPorUrl[v.url] = v.tema));
-  const temasUsados = new Set(
-    selecionados.map((a) => mapaTemaPorUrl[a.url]).filter(Boolean),
-  );
-  const contarFonte = () => {
-    const c = {};
-    selecionados.forEach((a) => (c[a.fonte] = (c[a.fonte] || 0) + 1));
-    return c;
+// ─── Montagem das versões (código, sem IA) ────────────────────
+// Recebe as listas da curadoria já validadas (ordem = score) e decide o que
+// entra em cada versão, respeitando: nenhum artigo em dois lugares (exceto as
+// 2 notícias Brasil, que são compartilhadas pelas 5 segmentadas), sem fonte
+// repetida dentro da versão, e segmento com menos de 2 notícias completado com
+// a melhor notícia geral ainda não usada.
+function distribuirArtigos(validadosPorLista) {
+  const usados = new Set();
+  // Escolhe até `qtd` artigos de `candidatos`, em ordem, sem repetir artigo já
+  // usado nem fonte em `fontesBloqueadas`. Com distinguirTema, primeiro tenta
+  // temas distintos e só depois relaxa (mesma lógica do antigo completarSelecionados).
+  const escolher = (candidatos, qtd, { fontesBloqueadas = new Set(), distinguirTema = false } = {}) => {
+    const escolhidos = [];
+    const fontes = new Set(fontesBloqueadas);
+    const passadas = distinguirTema ? [true, false] : [false];
+    for (const exigirTemaNovo of passadas) {
+      for (const c of candidatos) {
+        if (escolhidos.length >= qtd) break;
+        if (usados.has(c.id) || escolhidos.includes(c) || fontes.has(c.fonte)) continue;
+        if (exigirTemaNovo && escolhidos.some((e) => e.tema === c.tema)) continue;
+        escolhidos.push(c);
+        fontes.add(c.fonte);
+      }
+    }
+    escolhidos.forEach((c) => usados.add(c.id));
+    return escolhidos;
   };
 
-  const candidatosReais = validados.filter((v) => v.posicao < 3 && !usados.has(v.url));
-  const candidatosBackup = validados.filter((v) => v.posicao >= 3 && !usados.has(v.url));
-  for (const cand of [...candidatosReais, ...candidatosBackup]) {
-    if (selecionados.length >= MAX) break;
-    if (temasUsados.has(cand.tema)) continue;
-    if ((contarFonte()[cand.fonte] || 0) >= 1) continue;
+  const geral = escolher(validadosPorLista.geral, 3, { distinguirTema: true });
+  // Reserva da versão geral: o que sobrou dela, na ordem de score. É a "melhor
+  // notícia geral de operação ainda não usada" que completa segmento e Brasil.
+  const reservaGeral = () => validadosPorLista.geral.filter((c) => !usados.has(c.id));
 
-    let dados;
-    try {
-      const texto = await chamarClaude(promptArtigoAvulso(cand, mapaResumos[cand.url]), { maxTokens: 1500, schema: SCHEMA_ARTIGO_AVULSO });
-      dados = JSON.parse(repairJSON(texto));
-    } catch (e) {
-      console.log(`⚠️ Falha ao gerar artigo avulso pra "${cand.titulo_original}" (${e.message}), pulando.`);
-      continue;
-    }
-    console.log(`⚠️ Artigo completado em código (IA deixou vaga): ${cand.titulo_original} (${cand.fonte})`);
-    selecionados.push({
-      categoria: dados.categoria || cand.tema || 'Notícia',
-      titulo: dados.titulo || '',
-      url: cand.url,
-      fonte: cand.fonte,
-      imagem: cand.imagem,
-    });
-    usados.add(cand.url);
-    temasUsados.add(cand.tema);
+  const brasil = escolher(validadosPorLista.brasil, 2, { distinguirTema: true });
+  if (brasil.length < 2) {
+    const extra = escolher(reservaGeral(), 2 - brasil.length, { fontesBloqueadas: new Set(brasil.map((b) => b.fonte)) });
+    extra.forEach((e) => console.log(`  ⚠️ Brasil com menos de 2 notícias: completado com a geral "${e.titulo_original}" (${e.fonte})`));
+    brasil.push(...extra.map((e) => ({ ...e, completou: 'brasil' })));
   }
-  return selecionados;
+
+  const segmentos = {};
+  for (const seg of SEGMENTOS) {
+    const fontesBrasil = new Set(brasil.map((b) => b.fonte));
+    const doSegmento = escolher(validadosPorLista[seg] || [], 2, { fontesBloqueadas: fontesBrasil });
+    if (doSegmento.length < 2) {
+      const fontes = new Set([...fontesBrasil, ...doSegmento.map((d) => d.fonte)]);
+      const extra = escolher(reservaGeral(), 2 - doSegmento.length, { fontesBloqueadas: fontes });
+      extra.forEach((e) => console.log(`  ⚠️ ${seg}: só ${doSegmento.length} notícia(s) do setor; completado com a geral "${e.titulo_original}" (${e.fonte})`));
+      doSegmento.push(...extra.map((e) => ({ ...e, completou: seg })));
+    }
+    segmentos[seg] = doSegmento;
+  }
+  return { geral, brasil, segmentos };
 }
 
 // ─── Orquestração ────────────────────────────────────────────
@@ -475,22 +544,11 @@ async function main() {
   const edicaoAtual = String(numeros.length > 0 ? Math.max(...numeros) : 1);
   console.log(`✓ Edição para curadoria: ${edicaoAtual}`);
 
-  // "Filtrar Edição Atual"
-  // Só a trilha frota (pool da versão geral). As trilhas segmento/Brasil
-  // (out/2026) ficam no banco para a curadoria segmentada; linhas antigas
-  // têm trilha vazia e contam como frota.
-  const dessaEdicao = rows.filter(
-    (r) => String(r.edicao) === edicaoAtual && (!r.trilha || r.trilha === 'frota'),
-  );
-  if (dessaEdicao.length === 0) {
-    throw new Error(`Nenhum artigo para edição ${edicaoAtual}. WF-01 não rodou ou não encontrou conteúdo.`);
-  }
-  if (dessaEdicao.length < 4) {
-    console.log(`⚠️ Apenas ${dessaEdicao.length} artigos disponíveis (esperado 4+). Newsletter pode ficar incompleta.`);
-  }
-  console.log(`Artigos da edição ${edicaoAtual}: ${dessaEdicao.length}`);
-
-  // "Preparar Curadoria" + "Claude API - Curadoria" + "Parse Curadoria"
+  // "Filtrar Edição Atual" + pools. Geral = trilha frota (linhas antigas têm
+  // trilha vazia e contam como frota). Brasil e cada segmento = coluna
+  // segmento, de qualquer trilha (notícia de frota classificada num setor
+  // também concorre no setor; o código impede que entre em dois lugares).
+  const dessaEdicao = rows.filter((r) => String(r.edicao) === edicaoAtual);
   const artigos = dessaEdicao.map((r, idx) => ({
     id: idx + 1,
     titulo: r.titulo,
@@ -499,88 +557,120 @@ async function main() {
     data: r.data_publicacao,
     resumo: r.resumo,
     tema: r.tema || 'Outros',
+    trilha: r.trilha || 'frota',
+    segmento: r.segmento || '',
   }));
-  // Folga de tokens: o Sonnet 5.5 usa ~30% mais tokens que o 4.5 pro mesmo
-  // texto; com 3000 a curadoria chegou a ser cortada no teste de out/2026.
-  const textoCuradoria = await chamarClaude(promptCuradoria(artigos), { maxTokens: 8000, schema: SCHEMA_CURADORIA });
+  const paraPool = ({ trilha, segmento, url, ...resto }) => resto;
+  const pools = {
+    geral: artigos.filter((a) => a.trilha === 'frota').map(paraPool),
+    brasil: artigos.filter((a) => a.segmento === 'brasil').map(paraPool),
+    ...Object.fromEntries(SEGMENTOS.map((s) => [s, artigos.filter((a) => a.segmento === s).map(paraPool)])),
+  };
+  if (pools.geral.length === 0) {
+    throw new Error(`Nenhum artigo de frota para edição ${edicaoAtual}. WF-01 não rodou ou não encontrou conteúdo.`);
+  }
+  if (pools.geral.length < 4) {
+    console.log(`⚠️ Apenas ${pools.geral.length} artigos de frota (esperado 4+). Newsletter pode ficar incompleta.`);
+  }
+  console.log(`Artigos da edição ${edicaoAtual}: ${Object.entries(pools).map(([k, v]) => `${k} ${v.length}`).join(' | ')}`);
+
+  // "Claude API - Curadoria" + "Parse Curadoria". Folga de tokens: o Sonnet
+  // 5.5 usa ~30% mais tokens que o 4.5 pro mesmo texto.
+  const textoCuradoria = await chamarClaude(promptCuradoria(pools), { maxTokens: 12000, schema: SCHEMA_CURADORIA });
   let dadosCuradoria;
   try {
     dadosCuradoria = JSON.parse(repairJSON(textoCuradoria));
   } catch (e) {
     throw new Error('Falha ao parsear JSON da curadoria: ' + e.message);
   }
-  if (!dadosCuradoria.selecionados || !Array.isArray(dadosCuradoria.selecionados)) {
-    throw new Error('JSON da curadoria inválido');
-  }
-  // A regra "sem fonte repetida" é só pedida no prompt — a IA já violou isso
-  // na prática, o que desperdiça vaga de backup rio abaixo. Reforça em
-  // código, mantendo a ordem por score (mais alto primeiro).
-  const MAX_POR_FONTE_CURADORIA = 1;
-  const contagemFonte = {};
-  const semExcessoDeFonte = dadosCuradoria.selecionados.filter((art) => {
-    const fonte = art.fonte || 'Desconhecido';
-    contagemFonte[fonte] = (contagemFonte[fonte] || 0) + 1;
-    if (contagemFonte[fonte] > MAX_POR_FONTE_CURADORIA) {
-      console.log(`  ⚠️ Removido por excesso de fonte (>${MAX_POR_FONTE_CURADORIA}): ${art.titulo_original} (${fonte})`);
-      return false;
-    }
-    return true;
-  });
-  const selecionadosCuradoria = semExcessoDeFonte.map((art, idx) => ({ ...art, posicao: idx }));
-  console.log(`Curadoria: ${selecionadosCuradoria.length} artigos selecionados`);
+  if (!Array.isArray(dadosCuradoria.geral)) throw new Error('JSON da curadoria inválido');
 
-  // "Buscar HTML do Artigo" + "Extrair Imagem"
-  const comImagem = [];
-  for (let idx = 0; idx < selecionadosCuradoria.length; idx++) {
-    const original = selecionadosCuradoria[idx];
-    const tipo = idx < 3 ? 'REAL' : 'BACKUP';
-    const html = await buscarHTML(original.url);
-    const imagem = extrairImagem(html);
-    console.log(`[${idx}] ${tipo}: ${original.titulo_original} (${original.fonte}) ${imagem ? '✓ img' : '✗ sem img'}`);
-    comImagem.push({
-      titulo_original: original.titulo_original,
-      url: original.url,
-      fonte: original.fonte,
-      data: original.data,
-      score: original.score,
-      justificativa: original.justificativa,
-      categoria: original.categoria,
-      tema: original.tema || 'Outros',
-      imagem,
-      posicao: idx,
-    });
+  // Ids → artigos do banco. Descarta id fora do pool daquela lista. A regra
+  // "sem fonte repetida" da versão geral é só pedida no prompt — a IA já
+  // violou isso na prática, o que desperdiça vaga de backup rio abaixo.
+  // Reforça em código, mantendo a ordem por score (mais alto primeiro).
+  const porId = new Map(artigos.map((a) => [a.id, a]));
+  const selecionadosPorLista = {};
+  for (const lista of LISTAS_CURADORIA) {
+    const idsDoPool = new Set(pools[lista].map((a) => a.id));
+    const contagemFonte = {};
+    selecionadosPorLista[lista] = (dadosCuradoria[lista] || [])
+      .filter((s) => {
+        if (idsDoPool.has(s.id)) return true;
+        console.log(`  ⚠️ [${lista}] id ${s.id} fora do pool, ignorado.`);
+        return false;
+      })
+      .filter((s) => {
+        if (lista !== 'geral') return true;
+        const fonte = porId.get(s.id).fonte || 'Desconhecido';
+        contagemFonte[fonte] = (contagemFonte[fonte] || 0) + 1;
+        if (contagemFonte[fonte] > 1) {
+          console.log(`  ⚠️ Removido por excesso de fonte (>1): ${porId.get(s.id).titulo} (${fonte})`);
+          return false;
+        }
+        return true;
+      })
+      .map((s, posicao) => {
+        const a = porId.get(s.id);
+        return {
+          id: a.id, titulo_original: a.titulo, url: a.url, fonte: a.fonte, data: a.data,
+          tema: a.tema, score: s.score, justificativa: s.justificativa, categoria: s.categoria,
+          lista, posicao,
+        };
+      });
   }
+  console.log(`Curadoria: ${LISTAS_CURADORIA.map((l) => `${l} ${selecionadosPorLista[l].length}`).join(' | ')}`);
 
-  // "Validar URLs Vivas"
-  console.log(`\nValidando ${comImagem.length} artigos...`);
-  const validados = [];
+  // "Buscar HTML do Artigo" + "Extrair Imagem" + "Validar URLs Vivas", uma vez
+  // por artigo (a curadoria pode, contra a regra, pôr o mesmo id em 2 listas).
+  const unicos = [...new Map(Object.values(selecionadosPorLista).flat().map((s) => [s.id, s])).values()];
+  console.log(`\nValidando ${unicos.length} artigos...`);
   let descartados = 0;
   let imagensDescartadas = 0;
-  for (let idx = 0; idx < comImagem.length; idx++) {
-    const artigo = comImagem[idx];
+  const resultadoValidacao = await mapLimitado(unicos, 4, async (artigo) => {
     const vURL = await validarURL(artigo.url);
     if (deveDescartar(vURL)) {
-      console.log(`  [${idx}] ✗ DESCARTADO: HTTP ${vURL.status}`);
+      console.log(`  ✗ DESCARTADO (HTTP ${vURL.status}): ${artigo.titulo_original} (${artigo.fonte})`);
       descartados++;
-      continue;
+      return null;
     }
-    let imagem = artigo.imagem;
-    if (imagem) {
-      const vImg = await validarURL(imagem);
-      if (deveDescartar(vImg)) {
-        imagem = null;
-        imagensDescartadas++;
-      }
+    let imagem = extrairImagem(await buscarHTML(artigo.url));
+    if (imagem && deveDescartar(await validarURL(imagem))) {
+      imagem = null;
+      imagensDescartadas++;
     }
-    validados.push({ ...artigo, imagem });
+    console.log(`  ✓ [${artigo.lista} ${artigo.posicao}] ${artigo.titulo_original} (${artigo.fonte}) ${imagem ? '✓ img' : '✗ sem img'}`);
+    return [artigo.id, imagem];
+  });
+  const imagemPorId = new Map(resultadoValidacao.filter(Boolean));
+  const validadosPorLista = Object.fromEntries(
+    LISTAS_CURADORIA.map((l) => [
+      l,
+      selecionadosPorLista[l].filter((s) => imagemPorId.has(s.id)).map((s) => ({ ...s, imagem: imagemPorId.get(s.id) })),
+    ]),
+  );
+  console.log(`Válidos: ${imagemPorId.size}/${unicos.length} | descartados: ${descartados} | imagens removidas: ${imagensDescartadas}`);
+  if (validadosPorLista.geral.length === 0) {
+    throw new Error('Todos os artigos da versão geral foram descartados na validação. Verifique o WF-01.');
   }
-  console.log(`Válidos: ${validados.length}/${comImagem.length} | descartados: ${descartados} | imagens removidas: ${imagensDescartadas}`);
-  if (validados.length < 3) {
-    console.log(`⚠️ ALERTA: só ${validados.length} artigos válidos (precisa de 3).`);
+  if (validadosPorLista.geral.length < 3) {
+    console.log(`⚠️ ALERTA: só ${validadosPorLista.geral.length} artigos gerais válidos (precisa de 3).`);
   }
-  if (validados.length === 0) {
-    throw new Error('Todos os artigos foram descartados na validação. Verifique o WF-01.');
-  }
+
+  const distribuicao = distribuirArtigos(validadosPorLista);
+  // Cada artigo usado vira um objeto só (o segmento que reaproveita a reserva
+  // geral ou as notícias Brasil compartilhadas apontam pro mesmo objeto), pra
+  // imagem e título serem resolvidos uma vez.
+  const usadosPorId = new Map();
+  const registrar = (a) => {
+    if (!usadosPorId.has(a.id)) usadosPorId.set(a.id, { ...a });
+    return usadosPorId.get(a.id);
+  };
+  const geral = distribuicao.geral.map(registrar);
+  const brasil = distribuicao.brasil.map(registrar);
+  const segmentos = Object.fromEntries(SEGMENTOS.map((s) => [s, distribuicao.segmentos[s].map(registrar)]));
+  const usados = [...usadosPorId.values()];
+  console.log(`Distribuição: geral ${geral.length} | brasil ${brasil.length} | ${SEGMENTOS.map((s) => `${s} ${segmentos[s].length}`).join(' | ')}`);
 
   // Blog Lets: post mais recente + descrição (pra IA escrever o título) + imagem.
   // Movido do WF-03 pra cá — antes o scraping rodava na hora de montar o
@@ -607,42 +697,47 @@ async function main() {
   // raw.githubusercontent.com) e um único commit:
   //   (a) artigo sem imagem válida → gera via Gemini
   //   (b) imagem em CDN compartilhado → baixa e re-hospeda (ver lib/rehost.js)
-  // O nome do arquivo carrega o número da edição de propósito: e-mail já
-  // enviado aponta pra essa URL pra sempre, então nome não pode ser reusado.
+  // Só os artigos que entram em alguma versão (reservas não usadas ficam de
+  // fora). O nome do arquivo carrega o número da edição e o id do artigo de
+  // propósito: e-mail já enviado aponta pra essa URL pra sempre, então nome
+  // não pode ser reusado.
   const arquivos = [];
 
-  // (a) "Gerar Imagem Fallback (IA)": artigos sem imagem válida entre os 3
-  // "reais" (posições 0-2; 3 e 4 são backup e nunca entram na edição).
-  const semImagem = validados.filter((a) => !a.imagem && a.posicao < 3);
+  const semImagem = usados.filter((a) => !a.imagem);
   if (semImagem.length > 0) {
     console.log(`\nGerando ${semImagem.length} imagem(ns) via IA (Gemini) para artigos sem imagem...`);
     for (const artigo of semImagem) {
-      const { buffer, ext } = await gerarImagemPorTema({
-        titulo: artigo.titulo_original,
-        categoria: artigo.categoria,
-        tema: artigo.tema,
-      });
-      arquivos.push({
-        nomeArquivo: `ed${edicaoAtual}-pos${artigo.posicao}-${slugify(artigo.tema)}.${ext}`,
-        buffer,
-        aplicar: (url) => { artigo.imagem = url; },
-        rotulo: `[${artigo.posicao}] imagem gerada`,
-      });
+      try {
+        const { buffer, ext } = await gerarImagemPorTema({
+          titulo: artigo.titulo_original,
+          categoria: artigo.categoria,
+          tema: artigo.tema,
+        });
+        arquivos.push({
+          nomeArquivo: `ed${edicaoAtual}-a${artigo.id}-${slugify(artigo.tema)}.${ext}`,
+          buffer,
+          aplicar: (url) => { artigo.imagem = url; },
+          rotulo: `[${artigo.lista} ${artigo.posicao}] imagem gerada`,
+        });
+      } catch (e) {
+        // Antes um só artigo; agora até ~15 por semana. Falha de uma imagem
+        // não derruba a edição: o item sai sem imagem.
+        console.log(`  ⚠️ Falha ao gerar imagem pra "${artigo.titulo_original}" (${e.message}).`);
+      }
     }
   }
 
-  // (b) Re-hospedagem: cobre tanto os 3 artigos da edição quanto o destaque
-  // do blog. O blog é o caso comum, porque lets.com.br/blog roda em Webflow
-  // e tanto a og:image do post quanto o FALLBACK_BLOG_IMG saem do CDN deles.
-  // Holder da imagem do blog: resolve o fallback ANTES da re-hospedagem,
-  // senão o caminho "scraping do blog falhou" escaparia com a URL do Webflow
-  // do FALLBACK_BLOG_IMG intacta.
+  // (b) Re-hospedagem: cobre os artigos usados e o destaque do blog. O blog é
+  // o caso comum, porque lets.com.br/blog roda em Webflow e tanto a og:image
+  // do post quanto o FALLBACK_BLOG_IMG saem do CDN deles. Holder da imagem do
+  // blog: resolve o fallback ANTES da re-hospedagem, senão o caminho "scraping
+  // do blog falhou" escaparia com a URL do Webflow do FALLBACK_BLOG_IMG intacta.
   const blogImg = { imagem: blogRaw?.imagem || FALLBACK_BLOG_IMG };
 
   const candidatosRehost = [
-    ...validados
-      .filter((a) => a.posicao < 3 && precisaRehospedar(a.imagem))
-      .map((a) => ({ alvo: a, nome: `ed${edicaoAtual}-pos${a.posicao}-rehost`, rotulo: `[${a.posicao}] artigo` })),
+    ...usados
+      .filter((a) => precisaRehospedar(a.imagem))
+      .map((a) => ({ alvo: a, nome: `ed${edicaoAtual}-a${a.id}-rehost`, rotulo: `[${a.lista} ${a.posicao}] artigo` })),
     ...(precisaRehospedar(blogImg.imagem)
       ? [{ alvo: blogImg, nome: `ed${edicaoAtual}-blog`, rotulo: '[blog] destaque' }]
       : []),
@@ -658,7 +753,6 @@ async function main() {
           buffer,
           aplicar: (url) => {
             alvo.imagem = url;
-            // blogRaw vai no prompt da redação; mantém os dois consistentes.
             if (alvo === blogImg && blogRaw) blogRaw.imagem = url;
           },
           rotulo: `${rotulo} re-hospedado`,
@@ -682,80 +776,125 @@ async function main() {
     }
   }
 
-  // "Preparar Redação" + "Claude API - Redação"
-  const textoRedacao = await chamarClaude(promptRedacao(validados, blogRaw), { maxTokens: 8000, schema: SCHEMA_REDACAO });
-  let edicao;
+  // Composição das versões (ids; o blog entra como item próprio).
+  const BLOG = { tipo: 'blog' };
+  const composicoes = [
+    { versao: 'geral', descricao: 'versão geral, todos os leitores', itens: [BLOG, ...geral], segmento: null },
+    ...SEGMENTOS.map((s) => {
+      const [s1, s2] = segmentos[s];
+      const itens = [s1, BLOG, s2, ...brasil].filter(Boolean);
+      return { versao: s, descricao: `clientes de ${NOME_SEGMENTO[s]}`, itens, segmento: s };
+    }),
+  ];
+  const completas = composicoes.filter((c) => c.segmento === null || c.itens.length >= ITENS_VERSAO_SEGMENTADA);
+  composicoes
+    .filter((c) => !completas.includes(c))
+    .forEach((c) => console.log(`⚠️ Versão ${c.versao} com só ${c.itens.length} itens (mínimo ${ITENS_VERSAO_SEGMENTADA}): fica incompleta e o WF-03 não cria o rascunho dela.`));
+
+  // "Preparar Redação" + "Claude API - Redação". score/justificativa/posicao
+  // são metadado interno da curadoria — a redação não usa e seriam só tokens
+  // de input desperdiçados.
+  const paraRedacao = usados.map(({ id, titulo_original, fonte, data, categoria, tema }) => ({ id, titulo_original, fonte, data, categoria, tema }));
+  const chavesVersoes = completas.map((c) => c.versao);
+  const textoRedacao = await chamarClaude(promptRedacao(paraRedacao, completas, blogRaw), {
+    maxTokens: 12000,
+    schema: schemaRedacao(chavesVersoes),
+  });
+  let redacao;
   try {
-    edicao = JSON.parse(repairJSON(textoRedacao));
+    redacao = JSON.parse(repairJSON(textoRedacao));
   } catch (e) {
     throw new Error('Falha ao parsear JSON da redação: ' + e.message);
   }
-
-  // "Parse Edição Final + Validar URLs"
-  const obrigatorios = ['titulo_edicao', 'pre_header', 'artigos_selecionados', 'blog', 'cta_final'];
-  const faltando = obrigatorios.filter((c) => !edicao[c]);
+  const faltando = ['artigos', 'blog', 'versoes', 'cta_final'].filter((c) => !redacao[c]);
   if (faltando.length > 0) throw new Error(`Campos faltando: ${faltando.join(', ')}`);
+  if (!redacao.versoes.geral?.titulo_edicao) throw new Error('Redação sem titulo_edicao da versão geral');
 
-  // O assunto real é montarAssunto(titulo_edicao) + sufixo da marca (17
-  // chars, ver lib/template.js). Não trunca aqui: corte automático quebraria
-  // no meio da palavra. Só avisa, pra dar pra calibrar o prompt com o tempo.
-  if (edicao.titulo_edicao && edicao.titulo_edicao.length > 65) {
-    console.log(`⚠️ Título com ${edicao.titulo_edicao.length} chars (alvo: até 45 na estrutura afirmativa/pergunta, até 65 na de contraste). O Gmail no celular corta em ~33.`);
-  }
-  if (!Array.isArray(edicao.artigos_selecionados) || edicao.artigos_selecionados.length === 0) {
-    throw new Error('artigos_selecionados inválido ou vazio');
-  }
-
-  // Integridade de URL: corrige URL/fonte/imagem caso a IA tenha inventado.
-  const mapaOriginal = {};
-  validados.forEach((s) => (mapaOriginal[s.url] = { url: s.url, fonte: s.fonte, imagem: s.imagem }));
-  const validarArtigo = (artIA, posEsperada) => {
-    const urlIA = artIA.url || '';
-    if (mapaOriginal[urlIA]) {
-      const o = mapaOriginal[urlIA];
-      return { ...artIA, url: o.url, fonte: o.fonte, imagem: o.imagem };
+  // Título de cada artigo. url/fonte/imagem nunca vêm da IA (só o id), então
+  // não há URL inventada pra corrigir. Artigo sem título → chamada avulsa.
+  const tituloPorId = new Map((redacao.artigos || []).filter((a) => a.titulo).map((a) => [a.id, a]));
+  const mapaResumos = Object.fromEntries(artigos.map((a) => [a.id, a.resumo]));
+  for (const artigo of usados) {
+    let escrito = tituloPorId.get(artigo.id);
+    if (!escrito) {
+      try {
+        const texto = await chamarClaude(promptArtigoAvulso(artigo, mapaResumos[artigo.id]), { maxTokens: 1500, schema: SCHEMA_ARTIGO_AVULSO });
+        escrito = JSON.parse(repairJSON(texto));
+        console.log(`⚠️ Título completado em código (IA deixou vaga): ${artigo.titulo_original} (${artigo.fonte})`);
+      } catch (e) {
+        console.log(`⚠️ Falha ao gerar título avulso pra "${artigo.titulo_original}" (${e.message}); artigo sai das versões.`);
+        artigo.semTitulo = true;
+        continue;
+      }
     }
-    if (validados[posEsperada]) {
-      const o = validados[posEsperada];
-      console.log(`⚠️ URL corrigida (pos ${posEsperada}): IA inventou, usando original`);
-      return { ...artIA, url: o.url, fonte: o.fonte, imagem: o.imagem };
-    }
-    return artIA;
-  };
-  let selecionadosFinal = edicao.artigos_selecionados.map((a, idx) => validarArtigo(a, idx));
-
-  const mapaResumos = {};
-  artigos.forEach((a) => (mapaResumos[a.url] = a.resumo));
-  selecionadosFinal = await completarSelecionados(selecionadosFinal, validados, mapaResumos);
+    artigo.tituloFinal = escrito.titulo;
+    // Notícias Brasil levam o rótulo fixo do exemplo aprovado ("Brasil · Regulação").
+    artigo.categoriaFinal = artigo.lista === 'brasil'
+      ? `Brasil · ${ROTULO_TEMA_BRASIL[artigo.tema] || artigo.tema}`
+      : escrito.categoria || artigo.tema || 'Notícia';
+  }
 
   // Blog: garante fallback de imagem/url mesmo se a extração falhar.
   const blogFinal = {
-    categoria: edicao.blog.categoria || 'Blog Lets',
-    titulo: edicao.blog.titulo,
+    tipo: 'blog',
+    categoria: redacao.blog.categoria || 'Blog Lets',
+    titulo: redacao.blog.titulo,
     url: blogRaw?.url || 'https://www.lets.com.br/blog',
     fonte: 'Blog Lets',
     imagem: blogImg.imagem,
   };
+  const itemFinal = (it) => (it.tipo === 'blog'
+    ? blogFinal
+    : { tipo: 'noticia', categoria: it.categoriaFinal, titulo: it.tituloFinal, url: it.url, fonte: it.fonte, imagem: it.imagem });
 
-  console.log(`✓ Edição ${edicaoAtual} gerada: "${edicao.titulo_edicao}"`);
-  console.log(`Artigos selecionados: ${selecionadosFinal.length} | Blog: "${blogFinal.titulo}"`);
+  const agora = new Date().toISOString();
+  const linhasVersoes = [];
+  let geralItens = null;
+  let geralTexto = null;
+  for (const c of composicoes) {
+    const itens = c.itens.filter((it) => it.tipo === 'blog' || !it.semTitulo).map(itemFinal);
+    const texto = redacao.versoes[c.versao] || {};
+    const minimo = c.segmento ? ITENS_VERSAO_SEGMENTADA : 2;
+    const status = itens.length >= minimo && texto.titulo_edicao ? 'pronto' : 'incompleta';
+    if (texto.titulo_edicao && texto.titulo_edicao.length > 65) {
+      console.log(`⚠️ [${c.versao}] título com ${texto.titulo_edicao.length} chars (alvo: até 45, ou 65 no contraste). O Gmail no celular corta em ~33.`);
+    }
+    if (c.versao === 'geral') {
+      geralItens = itens;
+      geralTexto = texto;
+      // As duas versões gerais têm o mesmo conteúdo, assunto e pré-header
+      // (muda só o rodapé, no WF-03).
+      for (const versao of ['geral_comercial', 'geral_clientes']) {
+        linhasVersoes.push({ edicao: edicaoAtual, versao, titulo_edicao: texto.titulo_edicao, pre_header: texto.pre_header, json_itens: JSON.stringify(itens), status, gerado_em: agora });
+      }
+    } else {
+      linhasVersoes.push({ edicao: edicaoAtual, versao: c.versao, titulo_edicao: texto.titulo_edicao || '', pre_header: texto.pre_header || '', json_itens: JSON.stringify(itens), status, gerado_em: agora });
+    }
+  }
 
-  // "Salvar Edição" (upsert por edicao). json_artigos_cards fica sem uso a
-  // partir daqui (não existe mais divisão principais/cards) — mantido só
-  // pra não exigir migração destrutiva de coluna.
+  console.log(`\n✓ Edição ${edicaoAtual} gerada:`);
+  for (const l of linhasVersoes) {
+    console.log(`  ${l.versao.padEnd(16)} ${l.status.padEnd(10)} ${JSON.parse(l.json_itens).length} itens  "${l.titulo_edicao}"`);
+  }
+
+  // "Salvar Edição" (upsert por edicao). A tabela edicoes continua com a
+  // versão geral no formato de sempre (json_artigos_principais sem o blog,
+  // json_blog à parte). json_artigos_cards fica sem uso desde jul/2026 —
+  // mantido só pra não exigir migração destrutiva de coluna.
   const linha = {
     edicao: edicaoAtual,
-    titulo_edicao: edicao.titulo_edicao,
-    pre_header: edicao.pre_header,
-    json_artigos_principais: JSON.stringify(selecionadosFinal),
+    titulo_edicao: geralTexto.titulo_edicao,
+    pre_header: geralTexto.pre_header,
+    json_artigos_principais: JSON.stringify(geralItens.filter((i) => i.tipo !== 'blog')),
     json_artigos_cards: JSON.stringify([]),
     json_blog: JSON.stringify(blogFinal),
-    json_cta: JSON.stringify(edicao.cta_final),
+    json_cta: JSON.stringify(redacao.cta_final),
     status: 'pronto_envio_com_imagens',
-    gerado_em: new Date().toISOString(),
+    gerado_em: agora,
   };
   const res = await upsertLinhas(config.abaEdicoes, [linha], 'edicao');
-  console.log(`✓ Salvo na aba ${config.abaEdicoes}: ${res.inseridos} inseridos, ${res.atualizados} atualizados.`);
+  const resV = await upsertLinhas(config.abaVersoes, linhasVersoes, ['edicao', 'versao']);
+  console.log(`✓ Salvo: ${config.abaEdicoes} (${res.inseridos} inseridos, ${res.atualizados} atualizados), ${config.abaVersoes} (${resV.inseridos} inseridos, ${resV.atualizados} atualizados).`);
   commitarBanco(`chore: WF-02 curadoria e redação edição ${edicaoAtual}`);
 }
 
