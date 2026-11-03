@@ -7,17 +7,29 @@
 // agora roda no WF-02, antes da redação, pra IA poder escrever um título
 // sobre o post (ver json_blog). Este workflow só lê o que já foi
 // persistido no banco, sem scraping ao vivo.
+//
+// nov/2026: news segmentada (ver docs/plano-news-segmentada.md). Monta as 7
+// versões gravadas pelo WF-02 em edicoes_versoes: preview no Gmail com a
+// geral comercial no corpo e as outras 6 em anexo; rascunhos no E-goi
+// conforme config.egoiListas[].envios (34/69: geral comercial; 67: 5
+// segmentadas + geral para clientes). O teste de posição do CTA saiu.
 // ════════════════════════════════════════════════════════════
 import { config, requireEnv } from './lib/config.js';
 import { lerAba, upsertLinhas, commitarBanco } from './lib/db.js';
-import { montarHTML } from './lib/template.js';
+import { montarHTML, LINHA_IDENTIDADE_CLIENTE } from './lib/template.js';
 import { enviarPreview } from './lib/sender.js';
 import { criarRascunho, agendarEnvio } from './lib/egoi-campaign.js';
 import { proximoEnvio, checarAntesDeAgendar } from './lib/agendamento.js';
 
+const COMERCIAL = 'geral_comercial';
+const GERAL_CLIENTES = 'geral_clientes';
+const ORDEM_VERSOES = [COMERCIAL, GERAL_CLIENTES, 'mineracao', 'industria', 'engenharia', 'tecnologia', 'florestal'];
+// Mínimo de itens para agendar: gerais = blog + 3; segmentadas = 5.
+const minimoItens = (versao) => (versao === COMERCIAL || versao === GERAL_CLIENTES ? 4 : 5);
+
 // ─── Orquestração ────────────────────────────────────────────
 async function main() {
-  requireEnv(['GMAIL_USER', 'GMAIL_APP_PASSWORD']);
+  if (!config.modoTeste) requireEnv(['GMAIL_USER', 'GMAIL_APP_PASSWORD']);
 
   // "Ler Todas as Edições1" + "Validar e Selecionar Edição1"
   const { rows } = await lerAba(config.abaEdicoes);
@@ -32,72 +44,120 @@ async function main() {
   const selected = prontas.sort((a, b) => String(b.edicao).localeCompare(String(a.edicao)))[0];
   console.log(`Edição selecionada: ${selected.edicao} - ${selected.titulo_edicao}`);
 
-  // "Montar HTML1" — teste A/B de posição do CTA: gera as 3 variantes
-  // (início/meio/fim), todas com o mesmo texto de CTA (json_cta), só
-  // mudando posição/estilo do botão. "fim" é o comportamento de produção
-  // (vai no corpo do e-mail); as 3 vão em anexo pra comparação.
-  const variantes = ['inicio', 'meio', 'fim'].map((ctaPosicao) => ({
-    ctaPosicao,
-    montado: montarHTML(selected, { ctaPosicao }),
-  }));
-  const principal = variantes.find((v) => v.ctaPosicao === 'fim').montado;
-  console.log(`Edição ${principal.edicao} | Itens: ${principal.qtd_itens} | HTML: ${principal.html_final.length} chars`);
+  // Versões da edição. Edição gerada antes da news segmentada não tem linhas
+  // em edicoes_versoes: as duas gerais saem da linha de edicoes e cada envio
+  // segmentado cai na geral para clientes (ver abaixo).
+  const { rows: linhasVersoes } = await lerAba(config.abaVersoes);
+  const daEdicao = Object.fromEntries(
+    linhasVersoes.filter((v) => String(v.edicao) === String(selected.edicao)).map((v) => [v.versao, v]),
+  );
+  if (!daEdicao[COMERCIAL]) {
+    console.log('⚠️ Edição sem versões em edicoes_versoes: só as versões gerais, a partir de edicoes.');
+    for (const versao of [COMERCIAL, GERAL_CLIENTES]) daEdicao[versao] = { versao, status: 'pronto', legado: true };
+  }
 
-  // "Criar Anexo HTML1" + "Gmail - Enviar Preview1"
-  const anexos = variantes.map((v) => ({
-    filename: `lets_insights_${selected.edicao}_cta_${v.ctaPosicao}.html`,
-    content: Buffer.from(v.montado.html_final, 'utf-8'),
-  }));
+  // "Montar HTML1": uma montagem por versão pronta. A comercial leva o CTA
+  // (json_cta, da linha de edicoes); as de cliente, a linha de identidade.
+  const montadas = {};
+  for (const versao of ORDEM_VERSOES) {
+    const v = daEdicao[versao];
+    if (!v) continue;
+    if (v.status !== 'pronto') {
+      console.log(`⚠️ Versão ${versao} está "${v.status}": fica fora do preview e dos rascunhos.`);
+      continue;
+    }
+    const dados = v.legado ? selected : { ...v, json_cta: selected.json_cta };
+    const opts = versao === COMERCIAL ? {} : { semCta: true, linhaIdentidade: LINHA_IDENTIDADE_CLIENTE };
+    montadas[versao] = montarHTML(dados, opts);
+    const m = montadas[versao];
+    console.log(`  ${versao.padEnd(16)} ${m.qtd_itens} itens | ${m.html_final.length} chars | ${m.assunto_preview}`);
+  }
+  const principal = montadas[COMERCIAL];
+  if (!principal) throw new Error('Versão geral comercial não montada.');
+
+  // "Criar Anexo HTML1" + "Gmail - Enviar Preview1": geral comercial no
+  // corpo, as outras versões em anexo.
+  const anexos = Object.entries(montadas)
+    .filter(([versao]) => versao !== COMERCIAL)
+    .map(([versao, m]) => ({
+      filename: `lets_insights_${selected.edicao}_${versao}.html`,
+      content: Buffer.from(m.html_final, 'utf-8'),
+    }));
   const messageId = await enviarPreview({
     assunto: principal.assunto_preview,
     html: principal.html_final,
     anexos,
     para: config.previewTo,
   });
-  console.log(`✓ Preview enviado para ${config.previewTo} (messageId: ${messageId}) — 3 variantes de CTA em anexo`);
+  console.log(`✓ Preview enviado para ${config.previewTo} (messageId: ${messageId}) com ${anexos.length} versão(ões) em anexo`);
 
-  // Rascunhos "POR PUBLICAR" no E-goi, um por lista, pra revisão manual
-  // antes do envio real. Só CRIA (status "draft") — nunca dispara
-  // /actions/send; isso continua exigindo autorização explícita do Yago
-  // a cada campanha, na hora que ele mesmo decidir enviar pelo E-goi.
-  // Falha aqui não derruba o WF-03: o preview do Gmail (passo crítico
-  // de validação) já foi enviado com sucesso acima.
+  // Rascunhos "POR PUBLICAR" no E-goi, um por envio de cada lista
+  // (config.egoiListas[].envios), pra revisão manual antes do envio real.
+  // Só CRIA (status "draft") — nunca dispara /actions/send; isso continua
+  // exigindo autorização explícita do Yago a cada campanha, na hora que ele
+  // mesmo decidir enviar pelo E-goi. Falha aqui não derruba o WF-03: o
+  // preview do Gmail (passo crítico de validação) já foi enviado acima.
   //
   // Agendamento automático (decisão do Yago em 2026-10-22): com o
   // interruptor EGOI_AGENDAMENTO=ligado, cada rascunho que passar nas
-  // checagens é agendado pra terça 07h30 (BRT) e o Yago recebe um resumo;
-  // ele cancela pelo painel do E-goi o que estiver errado. Desligado (padrão),
-  // nada muda: só rascunho.
+  // checagens é agendado pra terça 07h30 (BRT), no segmento salvo do envio,
+  // e o Yago recebe um resumo; ele cancela pelo painel do E-goi o que estiver
+  // errado. Desligado (padrão), nada muda: só rascunho.
   const quando = proximoEnvio();
-  const problemas = checarAntesDeAgendar({ montado: principal, previewEnviado: Boolean(messageId) });
   const resumo = [];
   for (const lista of config.egoiListas) {
-    let hash;
-    try {
-      hash = await criarRascunho({
-        listId: lista.id,
-        internalName: `${config.egoiAgendamento && !problemas.length ? 'AGENDADA' : 'POR PUBLICAR'} · ${principal.titulo_edicao} · ${lista.nome}`,
-        subject: principal.assunto_preview,
-        html: principal.html_final,
-      });
-      console.log(`✓ Rascunho E-goi criado (${lista.nome}): ${hash}`);
-    } catch (e) {
-      console.error(`✗ Falha ao criar rascunho E-goi (${lista.nome}):`, e.message);
-      resumo.push({ lista: lista.nome, status: 'erro ao criar rascunho', detalhe: e.message });
-      continue;
-    }
-    if (!config.egoiAgendamento) continue;
-    if (problemas.length) {
-      resumo.push({ lista: lista.nome, status: 'NÃO agendada (ficou como rascunho)', detalhe: problemas.join('; ') });
-      continue;
-    }
-    try {
-      await agendarEnvio({ campaignHash: hash, listId: lista.id, segmentIds: lista.segmentIds || [], quando });
-      console.log(`✓ Agendada (${lista.nome}) para ${quando}`);
-      resumo.push({ lista: lista.nome, status: `agendada para ${quando}`, detalhe: hash });
-    } catch (e) {
-      console.error(`✗ Falha ao agendar (${lista.nome}):`, e.message);
-      resumo.push({ lista: lista.nome, status: 'NÃO agendada (erro no E-goi, ficou como rascunho)', detalhe: e.message });
+    for (const envio of lista.envios) {
+      const nomeEnvio = envio.rotulo ? `${lista.nome} · ${envio.rotulo}` : lista.nome;
+      // Versão segmentada que não ficou pronta: o segmento recebe a geral para
+      // clientes, em rascunho que nunca é agendado sozinho.
+      let versaoUsada = envio.versao;
+      const problemasExtras = [];
+      if (!montadas[versaoUsada] && versaoUsada !== COMERCIAL) {
+        console.log(`⚠️ ${nomeEnvio}: versão ${versaoUsada} indisponível, rascunho com a geral para clientes.`);
+        problemasExtras.push(`versão ${versaoUsada} indisponível, rascunho montado com a geral para clientes`);
+        versaoUsada = GERAL_CLIENTES;
+      }
+      const montado = montadas[versaoUsada];
+      if (!montado) {
+        resumo.push({ lista: nomeEnvio, status: 'sem rascunho', detalhe: `versão ${versaoUsada} indisponível` });
+        continue;
+      }
+      const problemas = [
+        ...checarAntesDeAgendar({ montado, previewEnviado: Boolean(messageId), minimoItens: minimoItens(versaoUsada) }),
+        ...problemasExtras,
+      ];
+      const prefixo = config.egoiAgendamento && !problemas.length ? 'AGENDADA' : 'POR PUBLICAR';
+      // 67: "POR PUBLICAR · Gestores · Mineração · <manchete>"; 34/69 como antes.
+      const internalName = envio.rotulo
+        ? `${prefixo} · ${lista.rotulo || lista.nome} · ${envio.rotulo} · ${montado.titulo_edicao}`
+        : `${prefixo} · ${montado.titulo_edicao} · ${lista.nome}`;
+      let hash;
+      try {
+        hash = await criarRascunho({
+          listId: lista.id,
+          internalName,
+          subject: montado.assunto_preview,
+          html: montado.html_final,
+        });
+        console.log(`✓ Rascunho E-goi criado (${nomeEnvio}): ${hash} · ${internalName}`);
+      } catch (e) {
+        console.error(`✗ Falha ao criar rascunho E-goi (${nomeEnvio}):`, e.message);
+        resumo.push({ lista: nomeEnvio, status: 'erro ao criar rascunho', detalhe: e.message });
+        continue;
+      }
+      if (!config.egoiAgendamento) continue;
+      if (problemas.length) {
+        resumo.push({ lista: nomeEnvio, status: 'NÃO agendada (ficou como rascunho)', detalhe: problemas.join('; ') });
+        continue;
+      }
+      try {
+        await agendarEnvio({ campaignHash: hash, listId: lista.id, segmentIds: envio.segmentIds || [], quando });
+        console.log(`✓ Agendada (${nomeEnvio}) para ${quando}`);
+        resumo.push({ lista: nomeEnvio, status: `agendada para ${quando}`, detalhe: hash });
+      } catch (e) {
+        console.error(`✗ Falha ao agendar (${nomeEnvio}):`, e.message);
+        resumo.push({ lista: nomeEnvio, status: 'NÃO agendada (erro no E-goi, ficou como rascunho)', detalhe: e.message });
+      }
     }
   }
 
@@ -109,7 +169,7 @@ async function main() {
     const agendadas = resumo.filter((r) => r.status.startsWith('agendada')).length;
     try {
       await enviarPreview({
-        assunto: `Let's Insights ${selected.edicao}: ${agendadas} de ${config.egoiListas.length} campanhas agendadas para ${quando.slice(8, 10)}/${quando.slice(5, 7)} às ${quando.slice(11, 16)}`,
+        assunto: `Let's Insights ${selected.edicao}: ${agendadas} de ${resumo.length} campanhas agendadas para ${quando.slice(8, 10)}/${quando.slice(5, 7)} às ${quando.slice(11, 16)}`,
         html: `<p>Edição ${esc(selected.edicao)} · <b>${esc(principal.assunto_preview)}</b></p>
 <table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px">${linhas}</table>
 <p>Para cancelar: no painel do E-goi, abra a campanha agendada (nome começando com "AGENDADA ·") e cancele o agendamento antes do horário.</p>
@@ -124,13 +184,18 @@ async function main() {
 
   // "Confirmar Preview1" + "Atualizar Status1"
   // (Correção do bug conhecido: grava na aba Edicoes, preservando as demais colunas.)
+  const enviadoEm = new Date().toISOString();
   const linha = {
     ...selected,
     status: 'draft_enviado_com_imagens',
-    enviado_em: new Date().toISOString(),
+    enviado_em: enviadoEm,
   };
   const res = await upsertLinhas(config.abaEdicoes, [linha], 'edicao');
-  console.log(`✓ Status atualizado na aba ${config.abaEdicoes}: ${res.atualizados} atualizado(s).`);
+  const versoesEnviadas = Object.values(daEdicao)
+    .filter((v) => !v.legado && montadas[v.versao])
+    .map((v) => ({ ...v, status: 'draft_enviado', enviado_em: enviadoEm }));
+  await upsertLinhas(config.abaVersoes, versoesEnviadas, ['edicao', 'versao']);
+  console.log(`✓ Status atualizado: ${config.abaEdicoes} (${res.atualizados}), ${config.abaVersoes} (${versoesEnviadas.length} versões).`);
   commitarBanco(`chore: WF-03 envio edição ${selected.edicao}`);
 }
 

@@ -27,7 +27,7 @@ As trilhas de segmento e Brasil alimentam a **news segmentada**, ainda em constr
 - Modelo **`claude-sonnet-5-5` com raciocínio desligado** (`thinking: {type: "between_tools"}`, em `src/lib/claude.js`). Não usar no modo padrão: fica mais caro e cortou a curadoria no limite de tokens no teste.
 - Respostas em **JSON com formato fixo** (saída estruturada, `schema`): sem isso o Sonnet 5.5 chegou a devolver dois JSONs com comentários (edição 22).
 - **API de lote (metade do preço):** espera o resultado até as 14:30 (Brasília) ou até 5h30 de espera, o que vier primeiro (o GitHub encerra job com mais de 6h); depois disso cancela e faz a chamada normal. O preview pode chegar até as 15h de segunda. Desliga com `CLAUDE_LOTE=desligado`.
-- Imagem faltando: gerada pelo Gemini (`src/lib/imagegen.js`). Imagem em CDN compartilhado (ex.: Webflow): baixada e re-hospedada (`src/lib/rehost.js`). As duas vão para `public/generated/` e são servidas por `raw.githubusercontent.com` (por isso o repositório é público).
+- Imagem faltando: o item sai sem imagem (a geração pelo Gemini saiu em nov/2026). Imagem em CDN compartilhado (ex.: Webflow): baixada e re-hospedada (`src/lib/rehost.js`) em `public/generated/`, servida por `raw.githubusercontent.com` (por isso o repositório é público).
 
 ### WF-03 · E-goi
 
@@ -49,7 +49,6 @@ Em **Settings → Secrets and variables → Actions**:
 | Nome | Tipo | Usado em |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | secret | WF-02 (o workflow também passa pro WF-01, que não chama mais a Claude API) |
-| `GEMINI_API_KEY` | secret | WF-02 |
 | `GMAIL_USER`, `GMAIL_APP_PASSWORD`, `PREVIEW_TO` | secret | WF-03 (preview) |
 | `EGOI_API_KEY` | secret | WF-03 (campanhas no E-goi) |
 | `EGOI_AGENDAMENTO` | **variável** (não secret) | WF-03. Só agenda com o valor `ligado` |
@@ -88,7 +87,7 @@ src/
     agendamento.js         data do envio e checagens antes de agendar
     egoi-reports.js        leitura de relatórios do E-goi
     db.js                  SQLite e commit do banco
-    rss.js, imagegen.js, rehost.js, gitAssets.js, sender.js, config.js, repair.js
+    rss.js, rehost.js, gitAssets.js, sender.js, config.js, repair.js
 docs/
   plano-news-segmentada.md desenho aprovado da news segmentada
 data/newsletter.db         banco (commitado pelo bot)

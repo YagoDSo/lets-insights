@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { config, requireEnv } from './config.js';
 
 // ─────────────────────────────────────────────────────────────
@@ -9,9 +11,23 @@ import { config, requireEnv } from './config.js';
 // ─────────────────────────────────────────────────────────────
 const BASE_URL = 'https://api.egoiapp.com';
 
+// Modo de teste (MODO_TESTE=ligado): nenhuma chamada ao E-goi. Grava o que
+// seria criado/agendado em testeDir/egoi e devolve um hash fictício.
+let _contadorTeste = 0;
+function simular(acao, { html, ...dados }) {
+  const dir = path.join(config.testeDir, 'egoi');
+  fs.mkdirSync(dir, { recursive: true });
+  const hash = `teste${String(++_contadorTeste).padStart(3, '0')}`;
+  fs.writeFileSync(path.join(dir, `${hash}-${acao}.json`), JSON.stringify({ acao, ...dados, tamanho_html: html?.length }, null, 2));
+  if (html) fs.writeFileSync(path.join(dir, `${hash}-${acao}.html`), html);
+  console.log(`[MODO TESTE] E-goi: ${acao} simulado (${hash}), nada foi criado no E-goi.`);
+  return hash;
+}
+
 // Cria uma campanha de email em rascunho (status "draft"), pronta pra
 // revisão manual no E-goi. Retorna o campaign_hash.
 export async function criarRascunho({ listId, internalName, subject, html, senderId }) {
+  if (config.modoTeste) return simular('rascunho', { listId, internalName, subject, html });
   requireEnv(['EGOI_API_KEY']);
   const resposta = await fetch(BASE_URL + '/campaigns/email', {
     method: 'POST',
@@ -43,6 +59,7 @@ export async function criarRascunho({ listId, internalName, subject, html, sende
 // devolve nas campanhas).
 // ─────────────────────────────────────────────────────────────
 export async function agendarEnvio({ campaignHash, listId, segmentIds = [], quando }) {
+  if (config.modoTeste) return { simulado: simular('agendamento', { campaignHash, listId, segmentIds, quando }) };
   requireEnv(['EGOI_API_KEY']);
   if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(quando || '')) {
     throw new Error(`Data de agendamento inválida: "${quando}"`);

@@ -72,6 +72,25 @@ function conectar() {
     _db.exec(`ALTER TABLE ${config.abaArtigos} ADD COLUMN trilha TEXT`);
   }
 
+  // News segmentada (nov/2026, ver docs/plano-news-segmentada.md): uma linha
+  // por versão da edição. versao = geral_comercial | geral_clientes |
+  // mineracao | industria | engenharia | tecnologia | florestal. json_itens é
+  // a lista de itens na ordem do e-mail (blog incluído, campo tipo). A tabela
+  // edicoes continua com a versão geral, como antes.
+  _db.exec(`
+    CREATE TABLE IF NOT EXISTS ${config.abaVersoes} (
+      edicao TEXT NOT NULL,
+      versao TEXT NOT NULL,
+      titulo_edicao TEXT,
+      pre_header TEXT,
+      json_itens TEXT,
+      status TEXT,
+      gerado_em TEXT,
+      enviado_em TEXT,
+      PRIMARY KEY (edicao, versao)
+    );
+  `);
+
   return _db;
 }
 
@@ -90,22 +109,25 @@ export async function lerAba(tabela) {
 }
 
 // Upsert por coluna-chave (a coluna precisa ser PRIMARY KEY na tabela).
+// colChave pode ser uma lista, para PK composta (ex: ['edicao', 'versao']).
 export async function upsertLinhas(tabela, objetos, colChave) {
   if (!objetos.length) return { atualizados: 0, inseridos: 0 };
   const db = conectar();
+  const chaves = [].concat(colChave);
   const cols = db.prepare(`PRAGMA table_info(${tabela})`).all().map((c) => c.name);
-  const outrasCols = cols.filter((c) => c !== colChave);
+  const outrasCols = cols.filter((c) => !chaves.includes(c));
 
   const sql = `
     INSERT INTO ${tabela} (${cols.join(', ')})
     VALUES (${cols.map((c) => `@${c}`).join(', ')})
-    ON CONFLICT(${colChave}) DO UPDATE SET
+    ON CONFLICT(${chaves.join(', ')}) DO UPDATE SET
       ${outrasCols.map((c) => `${c} = excluded.${c}`).join(', ')}
   `;
   const stmt = db.prepare(sql);
 
+  const chaveDe = (r) => chaves.map((c) => String(r[c])).join('|');
   const chavesExistentes = new Set(
-    db.prepare(`SELECT ${colChave} FROM ${tabela}`).all().map((r) => r[colChave]),
+    db.prepare(`SELECT ${chaves.join(', ')} FROM ${tabela}`).all().map(chaveDe),
   );
 
   let atualizados = 0;
@@ -115,7 +137,7 @@ export async function upsertLinhas(tabela, objetos, colChave) {
       const params = {};
       cols.forEach((c) => (params[c] = obj[c] ?? null));
       stmt.run(params);
-      if (chavesExistentes.has(obj[colChave])) atualizados++;
+      if (chavesExistentes.has(chaveDe(obj))) atualizados++;
       else inseridos++;
     }
   });
@@ -131,6 +153,10 @@ export function commitarBanco(mensagem) {
   _db = undefined;
 
   if (!fs.existsSync(config.dbPath)) return;
+  if (config.modoTeste) {
+    console.log(`[MODO TESTE] Banco não commitado (${config.dbPath}).`);
+    return;
+  }
   const status = gitOutput(['status', '--porcelain', '--', config.dbPath]).trim();
   if (!status) {
     console.log('Banco de dados sem alterações. Nada a commitar.');
