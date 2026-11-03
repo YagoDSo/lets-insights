@@ -68,7 +68,7 @@ Continua **uma chamada de curadoria e uma de redação** (Sonnet 4.5), só que m
   - cada segmento: 4 (2 + 2 reserva);
   - Brasil: 4 (2 + 2 reserva), de temas diferentes.
   Um artigo não pode ser usado em dois lugares. Diversidade de fonte vale dentro de cada versão.
-- **Validação de link e imagem, fallback Gemini e re-hospedagem:** rodam uma vez sobre a união dos artigos (sem duplicar trabalho).
+- **Validação de link e imagem e re-hospedagem:** rodam uma vez sobre a união dos artigos (sem duplicar trabalho).
 - **Redação:** escreve cada artigo uma única vez (o mesmo título serve para todas as versões em que ele aparece) e gera assunto + pré-header para cada uma das 7 versões.
 - **Faltou notícia de segmento** (menos de 2 válidas depois da validação): completa com a melhor notícia geral de operação ainda não usada. A versão nunca sai com menos de 5 itens.
 - **Custo estimado:** de cerca de US$ 0,06 para algo entre US$ 0,15 e 0,25 por semana (prompts maiores; mesmo número de chamadas).

@@ -43,7 +43,6 @@ No repo → **Settings → Secrets and variables → Actions → New repository 
 |---|---|
 | `ANTHROPIC_API_KEY` | a chave da Claude API |
 | `CLAUDE_MODEL` | `claude-sonnet-4-5-20250929` (opcional) |
-| `GEMINI_API_KEY` | chave do Gemini API (Google AI Studio) — geração de imagem fallback, ver `lib/imagegen.js` |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | **conteúdo inteiro** do arquivo `google-service-account.json` |
 | `SHEETS_DOC_ID` | `1xSjvbZwI-3oLScimPcpBftB2E4muLV07dt1ZOVo3N5s` |
 | `GMAIL_USER` | e-mail remetente do preview (só pro WF-03) |

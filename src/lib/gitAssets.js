@@ -4,7 +4,7 @@ import { git } from './gitBin.js';
 import { config } from './config.js';
 
 // ─────────────────────────────────────────────────────────────
-// Hospeda imagens geradas (ver lib/imagegen.js) commitando-as no próprio
+// Hospeda imagens re-hospedadas (ver lib/rehost.js) commitando-as no próprio
 // repositório e servindo via raw.githubusercontent.com. Regra do projeto:
 // e-mail nunca usa imagem base64 inline, sempre URL pública.
 // ─────────────────────────────────────────────────────────────

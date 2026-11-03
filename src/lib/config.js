@@ -15,9 +15,6 @@ export const config = {
   // Teto de espera por execução: o GitHub encerra job com mais de 6h.
   loteEsperaMaxMin: Number(process.env.CLAUDE_LOTE_ESPERA_MAX_MIN) || 330,
 
-  // Gemini API (geração de imagem fallback — ver lib/imagegen.js)
-  geminiApiKey: process.env.GEMINI_API_KEY,
-
   // Banco de dados (SQLite commitado no repo — ver lib/db.js)
   dbPath: process.env.SQLITE_DB_PATH || 'data/newsletter.db',
   abaArtigos: 'artigos_coletados',

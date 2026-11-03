@@ -15,7 +15,7 @@
 //
 // nov/2026: news segmentada (ver docs/plano-news-segmentada.md). A curadoria
 // cura 7 listas numa chamada (geral, Brasil e 5 segmentos); a validação de
-// link/imagem, o Gemini e a re-hospedagem rodam uma vez sobre a união; o
+// link/imagem e a re-hospedagem rodam uma vez sobre a união; o
 // código distribui os artigos nas versões (distribuirArtigos); a redação
 // escreve cada artigo uma vez e o assunto/pré-header de cada versão. Grava
 // a versão geral em edicoes (como antes) e as 7 versões em edicoes_versoes.
@@ -24,16 +24,11 @@ import { config, requireEnv } from './lib/config.js';
 import { lerAba, upsertLinhas, commitarBanco } from './lib/db.js';
 import { chamarClaude } from './lib/claude.js';
 import { repairJSON } from './lib/repair.js';
-import { gerarImagemPorTema } from './lib/imagegen.js';
 import { commitarImagensGeradas } from './lib/gitAssets.js';
 import { precisaRehospedar, baixarImagem } from './lib/rehost.js';
 
 const FALLBACK_BLOG_IMG =
   'https://cdn.prod.website-files.com/67d2cd7e700eb793f98a2e81/6a04acd2772388e00bdf5a8d_Gemini_Generated_Image_nmyoe6nmyoe6nmyo.png';
-
-const DIACRITICOS = new RegExp('[̀-ͯ]', 'g');
-const removerAcentos = (s) => s.normalize('NFD').replace(DIACRITICOS, '');
-const slugify = (s) => removerAcentos(s || 'geral').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
 // ─── Buscar HTML (GET, tolerante a falha, timeout 15s) — usado tanto pra
 // artigos coletados (via link normalizado, pode vir com encoding estranho
@@ -693,41 +688,22 @@ async function main() {
   }
 
   // ─── Imagens que precisam sair pro nosso domínio ───
-  // Dois casos distintos, mesmo destino (public/generated/, servido por
-  // raw.githubusercontent.com) e um único commit:
-  //   (a) artigo sem imagem válida → gera via Gemini
-  //   (b) imagem em CDN compartilhado → baixa e re-hospeda (ver lib/rehost.js)
-  // Só os artigos que entram em alguma versão (reservas não usadas ficam de
-  // fora). O nome do arquivo carrega o número da edição e o id do artigo de
-  // propósito: e-mail já enviado aponta pra essa URL pra sempre, então nome
-  // não pode ser reusado.
+  // Imagem em CDN compartilhado → baixa e re-hospeda em public/generated/,
+  // servido por raw.githubusercontent.com (ver lib/rehost.js), num único
+  // commit. Só os artigos que entram em alguma versão (reservas não usadas
+  // ficam de fora). O nome do arquivo carrega o número da edição e o id do
+  // artigo de propósito: e-mail já enviado aponta pra essa URL pra sempre,
+  // então nome não pode ser reusado.
+  //
+  // nov/2026: a geração de imagem pelo Gemini saiu (decisão do Yago). Artigo
+  // sem imagem própria válida sai sem imagem (o template omite o bloco).
   const arquivos = [];
-
   const semImagem = usados.filter((a) => !a.imagem);
   if (semImagem.length > 0) {
-    console.log(`\nGerando ${semImagem.length} imagem(ns) via IA (Gemini) para artigos sem imagem...`);
-    for (const artigo of semImagem) {
-      try {
-        const { buffer, ext } = await gerarImagemPorTema({
-          titulo: artigo.titulo_original,
-          categoria: artigo.categoria,
-          tema: artigo.tema,
-        });
-        arquivos.push({
-          nomeArquivo: `ed${edicaoAtual}-a${artigo.id}-${slugify(artigo.tema)}.${ext}`,
-          buffer,
-          aplicar: (url) => { artigo.imagem = url; },
-          rotulo: `[${artigo.lista} ${artigo.posicao}] imagem gerada`,
-        });
-      } catch (e) {
-        // Antes um só artigo; agora até ~15 por semana. Falha de uma imagem
-        // não derruba a edição: o item sai sem imagem.
-        console.log(`  ⚠️ Falha ao gerar imagem pra "${artigo.titulo_original}" (${e.message}).`);
-      }
-    }
+    console.log(`\n⚠️ ${semImagem.length} artigo(s) sem imagem própria; saem sem imagem: ${semImagem.map((a) => a.titulo_original).join(' | ')}`);
   }
 
-  // (b) Re-hospedagem: cobre os artigos usados e o destaque do blog. O blog é
+  // Re-hospedagem: cobre os artigos usados e o destaque do blog. O blog é
   // o caso comum, porque lets.com.br/blog roda em Webflow e tanto a og:image
   // do post quanto o FALLBACK_BLOG_IMG saem do CDN deles. Holder da imagem do
   // blog: resolve o fallback ANTES da re-hospedagem, senão o caminho "scraping
