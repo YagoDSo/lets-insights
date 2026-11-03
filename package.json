@@ -8,6 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "test": "node --test src/lib/*.test.js",
     "test-conexao": "node src/test-conexao.js",
     "wf01": "node src/wf01-coleta.js",
     "wf02": "node src/wf02-curadoria.js",

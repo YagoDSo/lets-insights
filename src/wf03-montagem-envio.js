@@ -13,6 +13,8 @@
 // geral comercial no corpo e as outras 6 em anexo; rascunhos no E-goi
 // conforme config.egoiListas[].envios (34/69: geral comercial; 67: 5
 // segmentadas + geral para clientes). O teste de posição do CTA saiu.
+// Antes do preview, reconfere a integridade de todos os links (revalidarLinks):
+// reprovou, o preview sai com [BLOQUEADO], nenhum rascunho é criado e o job falha.
 // ════════════════════════════════════════════════════════════
 import { config, requireEnv } from './lib/config.js';
 import { lerAba, upsertLinhas, commitarBanco } from './lib/db.js';
@@ -20,12 +22,63 @@ import { montarHTML, LINHA_IDENTIDADE_CLIENTE } from './lib/template.js';
 import { enviarPreview } from './lib/sender.js';
 import { criarRascunho, agendarEnvio } from './lib/egoi-campaign.js';
 import { proximoEnvio, checarAntesDeAgendar } from './lib/agendamento.js';
+import { buscarPagina } from './lib/paginas.js';
+import { verificarIntegridade, resumirMotivos } from './lib/integridade.js';
+import { blocoDiagnosticoHTML } from './lib/diagnostico.js';
 
 const COMERCIAL = 'geral_comercial';
 const GERAL_CLIENTES = 'geral_clientes';
 const ORDEM_VERSOES = [COMERCIAL, GERAL_CLIENTES, 'mineracao', 'industria', 'engenharia', 'tecnologia', 'florestal'];
 // Mínimo de itens para agendar: gerais = blog + 3; segmentadas = 5.
 const minimoItens = (versao) => (versao === COMERCIAL || versao === GERAL_CLIENTES ? 4 : 5);
+
+// ─── Reconferência na hora do envio ──────────────────────────
+// O WF-02 já verificou a integridade de cada link, mas o disparo real sai
+// depois da geração: a edição 16 ficou em rascunho de 15/09 em diante com um
+// link sequestrado. Uma página pode ser trocada nessa janela, então os links
+// são reconferidos aqui, logo antes do preview. Custo: 1 requisição HTTP por
+// link (4 em paralelo), nenhum token de API.
+async function revalidarLinks(itens) {
+  const problemas = [];
+  const bloqueio = (item, motivos) => problemas.push({
+    etapa: 'wf03 (reconferência)', acao: 'bloqueio', url: item.url, fonte: item.fonte, titulo: item.titulo, motivos,
+  });
+  let proximo = 0;
+  const trabalhador = async () => {
+    while (proximo < itens.length) {
+      const item = itens[proximo++];
+      const { html, urlFinal, status } = await buscarPagina(item.url);
+      if (status >= 400) {
+        bloqueio(item, [{ codigo: 'http_invalido', peso: 'grave', detalhe: `HTTP ${status}` }]);
+        continue;
+      }
+      if (status === 0) {
+        console.log(`  ~ ${item.url}: sem resposta (rede). Mantido, mesmo critério do WF-02.`);
+        continue;
+      }
+      // titulo_original é o título como o feed publicou, gravado pelo WF-02
+      // (não existe no blog nem em edições antigas: aí a comparação de título
+      // fica de fora e sobram spam/idioma/redirect, que já são as mais fortes).
+      // A imagem fica de fora: a gravada já passou pelo WF-02 e pode estar
+      // legitimamente em outro host (re-hospedada em raw.githubusercontent.com).
+      const r = verificarIntegridade({ url: item.url, urlFinal, html, tituloRss: item.titulo_original || '', resumoRss: '' });
+      const graves = r.motivos.filter((m) => m.peso === 'grave');
+      if (graves.length > 0) bloqueio(item, graves);
+      else if (r.motivos.length > 0) console.log(`  ~ ${item.url}: ${resumirMotivos(r.motivos)}`);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, itens.length) }, trabalhador));
+  return problemas;
+}
+
+const parseJSON = (valor, padrao) => {
+  try {
+    const v = JSON.parse(valor);
+    return v == null ? padrao : v;
+  } catch {
+    return padrao;
+  }
+};
 
 // ─── Orquestração ────────────────────────────────────────────
 async function main() {
@@ -75,21 +128,53 @@ async function main() {
   const principal = montadas[COMERCIAL];
   if (!principal) throw new Error('Versão geral comercial não montada.');
 
+  // Reconferência de integridade de todos os links que vão sair (blog +
+  // artigos das versões montadas, cada URL uma vez), logo antes do preview.
+  const itensParaConferir = new Map();
+  for (const versao of Object.keys(montadas)) {
+    const v = daEdicao[versao];
+    const itens = v.legado
+      ? [parseJSON(selected.json_blog, null), ...parseJSON(selected.json_artigos_principais, [])]
+      : parseJSON(v.json_itens, []);
+    for (const item of itens) if (item?.url && !itensParaConferir.has(item.url)) itensParaConferir.set(item.url, item);
+  }
+  console.log(`\nReconferindo ${itensParaConferir.size} link(s) antes do envio...`);
+  const problemas = await revalidarLinks([...itensParaConferir.values()]);
+  const bloqueado = problemas.length > 0;
+  if (bloqueado) {
+    console.error(`✗ ${problemas.length} link(s) reprovado(s) na reconferência:`);
+    problemas.forEach((p) => console.error(`  - ${p.url}: ${resumirMotivos(p.motivos)}`));
+  } else {
+    console.log('✓ Todos os links seguem apontando para o conteúdo esperado.');
+  }
+
   // "Criar Anexo HTML1" + "Gmail - Enviar Preview1": geral comercial no
-  // corpo, as outras versões em anexo.
+  // corpo, as outras versões em anexo. O bloco de diagnóstico entra só no
+  // CORPO do preview (e-mail interno); anexos e rascunhos seguem sem ele.
   const anexos = Object.entries(montadas)
     .filter(([versao]) => versao !== COMERCIAL)
     .map(([versao, m]) => ({
       filename: `lets_insights_${selected.edicao}_${versao}.html`,
       content: Buffer.from(m.html_final, 'utf-8'),
     }));
+  const diagnosticoWf02 = parseJSON(selected.json_diagnostico, []);
   const messageId = await enviarPreview({
-    assunto: principal.assunto_preview,
-    html: principal.html_final,
+    assunto: `${bloqueado ? '[BLOQUEADO] ' : ''}${principal.assunto_preview}`,
+    html: blocoDiagnosticoHTML([...problemas, ...diagnosticoWf02], { bloqueado }) + principal.html_final,
     anexos,
     para: config.previewTo,
   });
   console.log(`✓ Preview enviado para ${config.previewTo} (messageId: ${messageId}) com ${anexos.length} versão(ões) em anexo`);
+
+  // Reprovou na reconferência: o preview sai (com o alerta no topo) pra
+  // mostrar o que houve, mas nada mais acontece: sem rascunho no E-goi, sem
+  // mudar o status. Depois de corrigir o link no banco ou de o site voltar
+  // ao normal, basta rodar o WF-03 de novo.
+  if (bloqueado) {
+    throw new Error(
+      `Reconferência reprovou ${problemas.length} link(s). Rascunhos do E-goi não criados e status preservado. Veja o preview enviado para ${config.previewTo}.`,
+    );
+  }
 
   // Rascunhos "POR PUBLICAR" no E-goi, um por envio de cada lista
   // (config.egoiListas[].envios), pra revisão manual antes do envio real.
