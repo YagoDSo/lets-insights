@@ -570,8 +570,13 @@ async function main() {
   console.log(`Artigos da edição ${edicaoAtual}: ${Object.entries(pools).map(([k, v]) => `${k} ${v.length}`).join(' | ')}`);
 
   // "Claude API - Curadoria" + "Parse Curadoria". Folga de tokens: o Sonnet
-  // 5.5 usa ~30% mais tokens que o 4.5 pro mesmo texto.
-  const textoCuradoria = await chamarClaude(promptCuradoria(pools), { maxTokens: 12000, schema: SCHEMA_CURADORIA });
+  // 5.5 usa ~30% mais tokens que o 4.5 pro mesmo texto. Modelo da curadoria
+  // é o Haiku 5.5 desde nov/2026 (config.claudeModelCuradoria).
+  const textoCuradoria = await chamarClaude(promptCuradoria(pools), {
+    maxTokens: 12000,
+    schema: SCHEMA_CURADORIA,
+    model: config.claudeModelCuradoria,
+  });
   let dadosCuradoria;
   try {
     dadosCuradoria = JSON.parse(repairJSON(textoCuradoria));
