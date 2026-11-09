@@ -28,7 +28,7 @@ jobs:
           ref: main
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - run: npm ci
       # O modelo do Claude fica versionado no código (src/lib/config.js), não
@@ -52,7 +52,7 @@ jobs:
           ref: main
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - run: npm ci
       - run: npm run wf02
@@ -71,7 +71,7 @@ jobs:
           ref: main
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - run: npm ci
       - run: npm run wf03

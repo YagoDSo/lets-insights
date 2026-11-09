@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
-import { git, gitOutput } from './gitBin.js';
+import { git, gitOutput, commitComoBot } from './gitBin.js';
 
 // ─────────────────────────────────────────────────────────────
 // Camada de banco de dados. Arquivo SQLite commitado no próprio repositório
@@ -171,9 +171,7 @@ export function commitarBanco(mensagem) {
     return;
   }
 
-  git(['config', 'user.name', 'Lets Insights Bot']);
-  git(['config', 'user.email', 'bot@lets.com.br']);
   git(['add', config.dbPath]);
-  git(['commit', '-m', mensagem]);
+  commitComoBot(mensagem);
   git(['push']);
 }
