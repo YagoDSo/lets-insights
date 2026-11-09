@@ -31,33 +31,10 @@ import { commitarImagensGeradas } from './lib/gitAssets.js';
 import { precisaRehospedar, baixarImagem } from './lib/rehost.js';
 import { verificarIntegridade, resumirMotivos, extrairTextoVisivel } from './lib/integridade.js';
 import { buscarPagina, buscarHTML } from './lib/paginas.js';
+import { extrairImagem, extrairImagemPost } from './lib/imagem.js';
 
 const FALLBACK_BLOG_IMG =
   'https://cdn.prod.website-files.com/67d2cd7e700eb793f98a2e81/6a04acd2772388e00bdf5a8d_Gemini_Generated_Image_nmyoe6nmyoe6nmyo.png';
-
-// ─── Extrair Imagem (og:image → twitter:image → image_src) ───
-function extrairImagem(html) {
-  let imagem = null;
-  let m = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
-  if (m) imagem = m[1];
-  if (!imagem) {
-    m = html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
-    if (m) imagem = m[1];
-  }
-  if (!imagem) {
-    m = html.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i);
-    if (m) imagem = m[1];
-  }
-  if (!imagem) {
-    m = html.match(/<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']/i);
-    if (m) imagem = m[1];
-  }
-  if (imagem) {
-    if (imagem.startsWith('//')) imagem = 'https:' + imagem;
-    if (imagem.startsWith('http://')) imagem = imagem.replace('http://', 'https://');
-  }
-  return imagem || null;
-}
 
 // ─── Blog Lets: post mais recente (scraping da listagem) ──────
 const escaparRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -99,27 +76,6 @@ function extrairPostRecente(html) {
   }
 
   return { titulo, url };
-}
-
-// ─── Blog Lets: imagem do post (og/twitter → 1ª img CDN após h1) ─
-function extrairImagemPost(htmlPost) {
-  if (!htmlPost || htmlPost.length < 500) return null;
-  const og = htmlPost.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
-  const tw = htmlPost.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i);
-  if (og && og[1].includes('http')) return og[1];
-  if (tw && tw[1].includes('http')) return tw[1];
-
-  const idxH1 = htmlPost.search(/<h1[^>]*>/i);
-  if (idxH1 > 0) {
-    const aposH1 = htmlPost.substring(idxH1);
-    const imgMatch = aposH1.match(/<img[^>]+src=["']([^"']*cdn\.prod\.website-files\.com[^"']+)["']/i);
-    if (imgMatch) {
-      const src = imgMatch[1];
-      const estrutural = /logo|icon|favicon|menu|footer|header|avatar/i.test(src);
-      if (!estrutural) return src;
-    }
-  }
-  return null;
 }
 
 // ─── Blog Lets: descrição do post (og:description/meta description) —

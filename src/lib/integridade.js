@@ -156,6 +156,20 @@ export function termosSpam(texto) {
   return TERMOS_SPAM.filter((termo) => comBordas.includes(` ${termo} `));
 }
 
+// ─── Paywall: a página se declara paga? ───────────────────────
+// Edição 24 (nov/2026): uma matéria do Estadão entrou nas 5 versões
+// segmentadas, e o leitor que clicasse ia bater no muro de assinatura.
+// Site com paywall que quer continuar no Google precisa marcar o trecho
+// fechado com schema.org `isAccessibleForFree: false` (JSON-LD ou
+// microdata). O Estadão marca assim em toda matéria; das outras fontes
+// coletadas, nenhuma marcava como paga no levantamento de nov/2026.
+// Não pega paywall que não se declara nem limite de matérias grátis.
+export function declaraPaywall(html) {
+  if (!html) return false;
+  if (/"isAccessibleForFree"\s*:\s*"?false"?/i.test(html)) return true;
+  return /<meta[^>]+itemprop=["']isAccessibleForFree["'][^>]+content=["']false["']/i.test(html);
+}
+
 // ─── Hosts ────────────────────────────────────────────────────
 export function hostDe(url) {
   try {
@@ -211,11 +225,17 @@ export function verificarIntegridade({
   const tituloPagina = extrairTituloPagina(html);
   const sinais = { tituloPagina, texto: texto ? texto.length : 0 };
 
+  // 6. Matéria fechada para assinante. Vem antes da checagem de texto:
+  // a marcação está no HTML mesmo quando o corpo não é extraível.
+  if (declaraPaywall(html)) {
+    add('paywall', 'grave', 'página marcada como paga (isAccessibleForFree: false); o leitor não consegue ler sem assinatura');
+  }
+
   // Sem HTML não dá pra afirmar nada. Não reprova (pode ser bloqueio
   // anti-bot do site-fonte, já conhecido); só registra.
   if (!texto) {
     add('sem_conteudo', 'leve', 'não foi possível extrair texto da página');
-    return { ok: true, motivos, sinais };
+    return { ok: !motivos.some((m) => m.peso === 'grave'), motivos, sinais };
   }
 
   // 5. Redirect pra fora do domínio da fonte.
