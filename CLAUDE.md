@@ -195,9 +195,19 @@ Análise do gasto de tokens do pipeline Claude API, com o objetivo de reduzir cu
 - Outlook ignora padding de TD externa antes de tabela MSO — reduzir width da tabela MSO e pôr padding direto nas TDs MSO internas.
 - `repairJSON()` é necessário para parsear com robustez a saída JSON do Claude.
 - `raw.githubusercontent.com` **não serve arquivos de repositório privado** sem autenticação (não dá pra passar Authorization header num `<img src>` de e-mail). Só funciona se o repo for público — daí a decisão de tornar `lets-insights` público em jul/2026.
-- Commits automáticos de CI (imagens geradas) usam identidade `Lets Insights Bot <bot@lets.com.br>` via `git config` no próprio script (`src/lib/gitAssets.js`), pra diferenciar de commits manuais do Yago no histórico.
+- Commits automáticos (banco e imagens) usam identidade `Lets Insights Bot <bot@lets.com.br>` via `commitComoBot()` (`src/lib/gitBin.js`), que passa `git -c user.name=... -c user.email=...` só no comando de commit, pra diferenciar de commits manuais do Yago no histórico. **Nunca usar `git config user.name` no script:** até nov/2026 era assim, e gravava a identidade do bot no `.git/config` local; depois de rodar um WF na máquina, todo commit manual saía como bot (os `feat:`/`fix:` de out-nov/2026 estão com autoria do bot por isso).
+- Node do GitHub Actions: 24 (nov/2026; o 20 saiu de suporte em abr/2026). `better-sqlite3` 12.x tem binário pronto pra ele.
 - **SQLite commitado no repo (jul/2026):** como os jobs do GitHub Actions são efêmeros, `data/newsletter.db` só persiste entre WF-01→WF-02→WF-03 porque cada script chama `commitarBanco()` (`src/lib/db.js`) ao final, e cada job do workflow faz `actions/checkout` com `ref: main` explícito (não o padrão `github.sha`) pra pegar o commit do job anterior na mesma execução.
 - `better-sqlite3` não tem binário pré-compilado pra toda versão do Node imediatamente após o lançamento (ex: Node 24 exigiu a versão `^12.x`; a `11.x` só compila via `node-gyp`, que exige Python/Visual Studio Build Tools instalados). Ao atualizar Node localmente ou no `setup-node` do Actions, confirmar que a versão do `better-sqlite3` no `package.json` tem prebuild pra aquele ABI.
+
+## Versionamento (nov/2026)
+
+- Tags SemVer anotadas (`vX.Y.Z`) no commit de merge de cada PR de código que entra no `main`, com Release no GitHub (`gh release create vX.Y.Z --generate-notes`). `feat:` sobe o meio (v2.1.0), `fix:` sobe o último (v2.0.2), mudança que quebra banco ou formato do envio sobe o primeiro.
+- O `version` do `package.json` acompanha a tag: subir no próprio PR (`npm version X.Y.Z --no-git-tag-version`).
+- Commits semanais do bot (`chore: WF-0x ... edição N`, imagens) **nunca** ganham tag: são dados, não código.
+- Publicar tag/Release mexe no repositório público: pedir o ok do Yago antes.
+- **Não fazer merge no `main` enquanto o pipeline da semana estiver rodando** (segunda, da madrugada até o preview): o bot faz `git push` do banco sem `pull` e o push é recusado se o `main` andou no meio, derrubando a etapa.
+- Histórico (tags retroativas criadas em 2026-11-09; antes delas o `package.json` ficou em 0.1.0): v1.0.0 migração N8N → Node + SQLite (03/07) · v1.1.0 lista única, rascunhos no E-goi, teste A/B de CTA (18/08) · v1.2.0 geração na segunda (28/09) · v1.3.0 coleta segmentada e agendamento no E-goi (22/10) · v1.4.0 API de lote (26/10) · v2.0.0 news segmentada em 7 versões, Haiku na curadoria, integridade (03/11) · v2.0.1 identidade do git nos scripts, Node 24 no Actions, e-mails de terceiros fora do repo.
 
 ## Pendências / backlog
 

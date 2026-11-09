@@ -41,3 +41,12 @@ export function git(args, opts = {}) {
 export function gitOutput(args) {
   return execFileSync(resolverGit(), args).toString();
 }
+
+// Commit com a identidade do bot SÓ neste comando (git -c). Não usar
+// `git config user.name`: isso grava no .git/config e faz todo commit
+// manual seguinte, na máquina de quem rodou o script, sair como bot.
+const BOT = ['-c', 'user.name=Lets Insights Bot', '-c', 'user.email=bot@lets.com.br'];
+
+export function commitComoBot(mensagem) {
+  git([...BOT, 'commit', '-m', mensagem]);
+}

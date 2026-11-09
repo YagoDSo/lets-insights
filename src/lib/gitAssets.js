@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { git } from './gitBin.js';
+import { git, commitComoBot } from './gitBin.js';
 import { config } from './config.js';
 
 // ─────────────────────────────────────────────────────────────
@@ -33,10 +33,8 @@ export function commitarImagensGeradas(arquivos, mensagem) {
     return urls;
   }
 
-  git(['config', 'user.name', 'Lets Insights Bot']);
-  git(['config', 'user.email', 'bot@lets.com.br']);
   git(['add', ...arquivos.map((a) => `${DIR}/${a.nomeArquivo}`)]);
-  git(['commit', '-m', mensagem || `chore: imagem gerada por IA (fallback) — ${arquivos.length} arquivo(s)`]);
+  commitComoBot(mensagem || `chore: imagens re-hospedadas (${arquivos.length} arquivo(s))`);
   git(['push']);
 
   return urls;
