@@ -119,9 +119,10 @@ export function montarAssunto(tituloEdicao) {
   return t + SUFIXO_ASSUNTO;
 }
 
-// Texto aprovado pelo Yago no exemplo da news segmentada (2026-10-22).
-export const LINHA_IDENTIDADE_CLIENTE =
-  "Você recebe a Let's Insights por ser cliente Let's. Curadoria semanal do que muda na operação do seu setor.";
+// Texto aprovado pelo Yago no exemplo da news segmentada (2026-10-22),
+// encurtado por ele em 2026-11-09 (saiu "Você recebe a Let's Insights por
+// ser cliente Let's.").
+export const LINHA_IDENTIDADE_CLIENTE = 'Curadoria semanal do que muda na operação do seu setor.';
 
 // Itens na ordem do e-mail. Versão (json_itens) já vem pronta; a linha de
 // edicoes é blog + artigos.
