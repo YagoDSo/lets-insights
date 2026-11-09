@@ -1,6 +1,6 @@
 {
   "name": "newsletter-lets",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "Let's Insights — newsletter B2B automatizada (migrada do N8N para Node + GitHub Actions)",
   "type": "module",
   "private": true,
