@@ -19,6 +19,10 @@ import { lerAba, upsertLinhas, commitarBanco } from './lib/db.js';
 // devolve XML válido, mas ficou estagnado (item mais recente com 201 dias no
 // teste que motivou a remoção) — nunca contribuiu artigo em nenhuma edição
 // coletada até aqui, porque tudo cai no corte de idade de 60 dias.
+// Feed de economia do Estadão removido (nov/2026): toda matéria é fechada para
+// assinante (marcada com isAccessibleForFree: false). Uma entrou nas 5 versões
+// segmentadas da edição 24 e o leitor batia no paywall. A integridade
+// (src/lib/integridade.js) também barra qualquer página que se declare paga.
 const FEEDS = [
   // Base original (frota/transporte/logística/economia)
   { url: 'https://frotacia.com.br/feed/' },
@@ -82,7 +86,6 @@ const FEEDS = [
   // Exame, acima, também alimentam esta trilha.
   { url: 'https://agenciabrasil.ebc.com.br/rss/economia/feed.xml', fonte: 'Agência Brasil', segmento: 'brasil' },
   { url: 'https://www.infomoney.com.br/feed/', fonte: 'InfoMoney', segmento: 'brasil' },
-  { url: 'https://www.estadao.com.br/arc/outboundfeeds/feeds/rss/sections/economia/?body=%7B%22layout%22:%22google-news%22%7D', fonte: 'Estadão', segmento: 'brasil' },
   { url: 'https://g1.globo.com/rss/g1/economia/', fonte: 'g1', segmento: 'brasil' },
 ];
 

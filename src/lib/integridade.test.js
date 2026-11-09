@@ -12,6 +12,7 @@ import {
   imagemSuspeita,
   mesmoDominio,
   pareceportugues,
+  declaraPaywall,
 } from './integridade.js';
 
 const paginaLegitima = `<!DOCTYPE html><html lang="pt-BR"><head>
@@ -192,4 +193,36 @@ test('imagem em CDN de outro domínio é só informativa e não soma pra reprova
   });
   assert.ok(r.motivos.some((m) => m.codigo === 'imagem_host_diferente' && m.peso === 'info'));
   assert.equal(r.ok, true);
+});
+
+// Edição 24 (nov/2026): matéria do Estadão fechada para assinante entrou
+// nas 5 versões segmentadas. A página se declara paga no JSON-LD.
+const jsonLdPago = `<script type="application/ld+json">{"@type":"NewsArticle","isAccessibleForFree":"False","hasPart":{"@type":"WebPageElement","isAccessibleForFree":"False","cssSelector":"[data-paywall-wrapper]"}}</script>`;
+
+test('matéria marcada como paga é reprovada mesmo com título e resumo batendo', () => {
+  const r = verificarIntegridade({
+    url: 'https://ocarreteiro.com.br/ultimas-noticias/retrofit-de-caminhoes/',
+    html: paginaLegitima.replace('</head>', `${jsonLdPago}</head>`),
+    tituloRss: tituloRssLegitimo,
+    resumoRss: resumoRssLegitimo,
+  });
+  assert.equal(r.ok, false);
+  assert.ok(r.motivos.some((m) => m.codigo === 'paywall' && m.peso === 'grave'));
+});
+
+test('paywall reprova também quando o corpo da página não é extraível', () => {
+  const r = verificarIntegridade({
+    url: 'https://www.estadao.com.br/economia/x/',
+    html: `<html><head>${jsonLdPago}</head><body></body></html>`.padEnd(600, ' '),
+  });
+  assert.equal(r.ok, false);
+});
+
+test('declaraPaywall: JSON-LD e microdata; marcação "true" não conta', () => {
+  assert.equal(declaraPaywall(jsonLdPago), true);
+  assert.equal(declaraPaywall('{"isAccessibleForFree": false}'), true);
+  assert.equal(declaraPaywall('<meta itemprop="isAccessibleForFree" content="false">'), true);
+  assert.equal(declaraPaywall('{"isAccessibleForFree":"True"}'), false);
+  assert.equal(declaraPaywall(paginaLegitima), false);
+  assert.equal(declaraPaywall(''), false);
 });
