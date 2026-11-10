@@ -170,7 +170,7 @@ Avalie cada artigo do POOL GERAL e selecione os 6 mais relevantes seguindo:
 3. AUTORIDADE DA FONTE (20%): Fontes especializadas valem mais
 4. ACIONABILIDADE (20%): O leitor (gestor de frota, coordenador de campo, engenheiro de campo) pode fazer algo com a informação na operação dele?
 
-Descarte: conteúdo promocional, cases de concorrente direta, notícias internacionais sem relevância pro Brasil, conteúdo genérico de RH/carreira/mobilidade urbana sem relação com operação de campo, e qualquer artigo com foco central em preço (promoção, desconto, "mais barato").
+Descarte: conteúdo promocional, cases de concorrente direta, notícias internacionais sem relevância pro Brasil, conteúdo genérico de RH/carreira/mobilidade urbana sem relação com operação de campo, transporte de passageiros (linhas e concessões de ônibus, viações, fretamento, rodoviárias, greves e acidentes de ônibus: o leitor não opera ônibus), e qualquer artigo com foco central em preço (promoção, desconto, "mais barato").
 
 REGRA DE DIVERSIDADE DE FONTE (CRÍTICA): NENHUMA fonte pode se repetir entre as 6 escolhidas — cada uma vem de uma fonte diferente. Esta regra é ESTRITA e vale pro conjunto inteiro (incluindo as reservas) — nunca escolha uma 2ª matéria da mesma fonte só porque ela também é relevante; prefira uma matéria de outra fonte, mesmo com score um pouco menor.
 

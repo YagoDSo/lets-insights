@@ -263,7 +263,8 @@ function filtrarRelevancia(itens) {
 
     if (!temEspecifico && !temGenericoComContexto) return false;
 
-    const temExclusao = palavrasExclusao.some((p) => textoNorm.includes(normalizar(p)));
+    const temExclusao = palavrasExclusao.some((p) => textoNorm.includes(normalizar(p)))
+      || ehPassageiros(textoNorm);
     if (temExclusao) {
       const temBlindado = termosBlindados.some((t) => textoNorm.includes(normalizar(t)));
       if (!temBlindado) {
@@ -457,6 +458,24 @@ const EXCLUSAO_SEGMENTO = [
   'metro', 'cptm', 'sptrans', 'viamobilidade', 'onibus urbano', 'transporte publico', 'brt', 'vlt',
   'tarifa de onibus', 'passageiros', 'linha 10-turquesa', 'trens metropolitanos',
 ];
+// Transporte rodoviário de passageiros (nov/2026): a exclusão B2C acima só
+// cobria ônibus URBANO, e "ônibus" é termo genérico aceito no filtro de frota.
+// Na edição 24 entrou uma matéria do Diário do Transporte sobre transferência
+// de linhas intermunicipais entre viações. Casa palavra inteira (por isso
+// "viacao" não pega "aviacao"). Ficam de fora, porque derrubavam matéria boa
+// no teste contra o histórico: "passageiros" sozinho (van/utilitário de
+// frota) e "rodoviaria" (é também adjetivo: "malha rodoviária"). A "Comissão
+// de Viação e Transportes" da Câmara é tirada do texto antes de comparar.
+const EXCLUSAO_PASSAGEIROS = [
+  'viacao', 'viacoes', 'linha de onibus', 'linhas de onibus', 'onibus intermunicipa*', 'onibus interestadua*',
+  'empresa de onibus', 'empresas de onibus', 'servicos de onibus', 'ligacoes de onibus', 'mercados de onibus',
+  'transporte de passageiros', 'transporte rodoviario de passageiros', 'transporte coletivo', 'janela da antt',
+  'terminal rodoviario',
+];
+const ehPassageiros = (txtNormalizado) => {
+  const t = txtNormalizado.replace(/comissao de viacao e transportes?/g, ' ');
+  return EXCLUSAO_PASSAGEIROS_RE.some((re) => re.test(t));
+};
 // Título majoritariamente em inglês (alguns portais misturam): fora.
 const PALAVRAS_INGLES = ['the', 'of', 'and', 'to', 'with', 'who', 'will', 'for', 'new', 'its', 'targets', 'question'];
 const pareceIngles = (titulo) => {
@@ -473,6 +492,7 @@ const compilar = (lista) => lista.map(regexDoTermo);
 const SEGMENTOS_RE = Object.fromEntries(Object.entries(SEGMENTOS).map(([k, v]) => [k, compilar(v)]));
 const TEMAS_BRASIL_RE = Object.fromEntries(Object.entries(TEMAS_BRASIL).map(([k, v]) => [k, compilar(v)]));
 const EXCLUSAO_BRASIL_RE = compilar(EXCLUSAO_BRASIL);
+const EXCLUSAO_PASSAGEIROS_RE = compilar(EXCLUSAO_PASSAGEIROS);
 const EXCLUSAO_SEGMENTO_RE = compilar(EXCLUSAO_SEGMENTO);
 const contar = (txt, regs) => regs.filter((re) => re.test(txt)).length;
 
@@ -482,7 +502,7 @@ function classificarSegmento(a) {
   const txt = normalizar((a.titulo || '') + ' ' + (a.resumo || ''));
   const dica = a.dicaSegmento || '';
   const vazio = { segmento: '', temaBrasil: '' };
-  if (pareceIngles(a.titulo) || EXCLUSAO_SEGMENTO_RE.some((re) => re.test(txt))) return vazio;
+  if (pareceIngles(a.titulo) || EXCLUSAO_SEGMENTO_RE.some((re) => re.test(txt)) || ehPassageiros(txt)) return vazio;
 
   let melhor = '';
   let melhorPontos = 0;
