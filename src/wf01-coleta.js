@@ -175,8 +175,9 @@ function calcularIdade(itens) {
 }
 
 // ─── Nó "Filtrar por Palavras-Chave1" (relevância B2B v2) ────
-function filtrarRelevancia(itens) {
-  const palavrasChave = [
+// Termos específicos do ICP: aprovam a matéria no filtro e pesam na nota de
+// relevância (notaRelevancia, abaixo).
+const PALAVRAS_ICP = [
     'terceirização de frota', 'terceirizacao de frota', 'gestão de frota', 'gestao de frota',
     'locação corporativa', 'locacao corporativa', 'locação de veículos', 'locacao de veiculos',
     'fleet management', 'frota empresarial', 'frota corporativa', 'frota leve', 'frota terceirizada',
@@ -207,6 +208,9 @@ function filtrarRelevancia(itens) {
     'coordenador de campo', 'supervisor de obra', 'gestor de frota', 'coordenador de frota',
     'diretor de operações', 'gerente de contratos',
   ];
+
+function filtrarRelevancia(itens) {
+  const palavrasChave = PALAVRAS_ICP;
   const termosGenericos = [
     'frota', 'frotas', 'logística', 'logistica', 'obra', 'obras', 'campo',
     // Loosening (jul/2026): categorias centrais do ICP que ainda dependiam só de match específico.
@@ -532,6 +536,54 @@ function classificarSegmento(a) {
   return { segmento: '', temaBrasil: '' };
 }
 
+// ─── Nota de relevância (nov/2026, v2.2.0) ───────────────────
+// O pool de frota pegava, dentro da janela, as 3 matérias MAIS NOVAS de cada
+// fonte. Agora pega as 3 de maior nota (mesma janela, mesmos limites por
+// fonte/tema e mesmo total), então a quantidade não muda. A nota só reordena
+// o que já passou no filtro; não descarta nada. Volta à ordem por data com a
+// variável WF01_ORDENACAO=data.
+const PALAVRAS_ICP_RE = compilar([...new Set(PALAVRAS_ICP.map(normalizar))]);
+const TEMAS_FORTES = new Set(['OperacaoCampo', 'Custos', 'RenovacaoFrota']);
+// Veículo e operação do ICP (picape, 4x4, utilitário): pesam na nota, mas não
+// entram no filtro, pra não deixar o pool mais permissivo.
+const BONUS_VEICULO_RE = compilar(['picape*', 'pickup*', '4x4', 'tracao', 'caixa de transferencia', 'comerciais leves', 'utilitario*', 'pneu*', 'diesel']);
+const PENALIDADES = [
+  { motivo: 'acidente/ocorrência', peso: -3, re: compilar(['acidente*', 'colisao', 'batida', 'capotou', 'capotamento', 'tombou', 'tombamento', 'ferido*', 'morre*', 'morte', 'mortos', 'incendio', 'atropel*']) },
+  { motivo: 'vídeo/galeria', peso: -2, re: compilar(['video', 'veja fotos', 'veja o video', 'galeria']) },
+  { motivo: 'feira/evento', peso: -1, re: compilar(['feira', 'estande', 'expositor*', 'lat.bus', 'premiacao', 'premio', 'homenagem']) },
+  { motivo: 'internacional', peso: -2, re: compilar(['eua', 'estados unidos', 'europa', 'europeu*', 'china', 'chines*', 'india', 'alemanha', 'japao', 'turquia', 'madri', 'mundial']) },
+  // Ônibus passa no filtro como veículo pesado, mas o leitor não opera ônibus.
+  // ("rodoviarios" fica de fora: casa com "implementos rodoviários".)
+  { motivo: 'ônibus', peso: -2, re: compilar(['onibus']) },
+];
+const MENCIONA_BRASIL = compilar(['brasil', 'brasileir*', 'nacional']);
+
+function notaRelevancia(a) {
+  // "segunda-feira" etc. não é feira.
+  const semDiaDaSemana = (s) => normalizar(s).replace(/(segunda|terca|quarta|quinta|sexta)-feira/g, ' ');
+  const txt = semDiaDaSemana((a.titulo || '') + ' ' + (a.resumo || ''));
+  const titulo = semDiaDaSemana(a.titulo || '');
+  const motivos = [];
+  let nota = 0;
+  const icp = PALAVRAS_ICP_RE.filter((re) => re.test(txt)).length;
+  if (icp) { nota += 3 * Math.min(icp, 3); motivos.push(`ICP x${icp}`); }
+  const tema = a._tema || classificarTema(a);
+  if (TEMAS_FORTES.has(tema)) { nota += 1; motivos.push(`tema ${tema}`); }
+  const veiculo = BONUS_VEICULO_RE.filter((re) => re.test(txt)).length;
+  if (veiculo) { nota += 2 * Math.min(veiculo, 2); motivos.push(`veículo x${veiculo}`); }
+  for (const p of PENALIDADES) {
+    // Penalidade olha o título (onde mora o assunto principal); "internacional"
+    // só vale se a matéria não fala do Brasil.
+    if (!p.re.some((re) => re.test(titulo))) continue;
+    if (p.motivo === 'internacional' && MENCIONA_BRASIL.some((re) => re.test(txt))) continue;
+    nota += p.peso;
+    motivos.push(p.motivo);
+  }
+  const idade = Number.isFinite(a.idade_dias) ? a.idade_dias : 30;
+  nota -= 0.15 * idade; // desempate a favor da mais nova (1 termo do ICP vale ~20 dias)
+  return { nota: Math.round(nota * 100) / 100, motivos };
+}
+
 function enriquecerELimitar(itens, edicaoAtual) {
   const MAX_TOTAL = 30;
   const MAX_POR_FONTE = 3;
@@ -541,7 +593,10 @@ function enriquecerELimitar(itens, edicaoAtual) {
   const dataColeta = new Date().toISOString();
 
   const aplicarCaps = (lista) => {
-    const ordenados = [...lista].sort((a, b) => new Date(b.data || 0) - new Date(a.data || 0));
+    const porData = (a, b) => new Date(b.data || 0) - new Date(a.data || 0);
+    const ordenados = process.env.WF01_ORDENACAO !== 'data'
+      ? [...lista].sort((a, b) => notaRelevancia(b).nota - notaRelevancia(a).nota || porData(a, b))
+      : [...lista].sort(porData);
     const contFonte = {};
     const contTema = {};
     const out = [];
@@ -703,4 +758,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 }
 
 // Exportados só para teste local (scripts de ensaio que não gravam no banco).
-export { FEEDS, padronizar, calcularIdade, filtrarRelevanciaComSegmentos, deduplicar, filtrarConcorrentes, enriquecerELimitar, classificarSegmento };
+export { FEEDS, padronizar, calcularIdade, filtrarRelevanciaComSegmentos, deduplicar, filtrarConcorrentes, enriquecerELimitar, classificarSegmento, notaRelevancia, classificarTema };
