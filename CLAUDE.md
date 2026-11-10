@@ -142,6 +142,14 @@ tabela → Escrever task ClickUp → Verificar integridade
 - **Risco conhecido e mitigação:** a API do ClickUp tem um bug reportado (buscar `markdown_description` e reenviar via `markdown_content` às vezes corrompe a formatação). Por decisão do Yago (2026-08-10), o script sobrescreve a descrição inteira mesmo assim — mas faz um **regex replace cirúrgico** (só o bloco da tabela, preservando o resto) e uma **verificação pós-escrita** (confere que marcadores-chave como `## Sobre o projeto` e `_Responsável: Yago_` sobreviveram; se sumirem, falha o job ruidosamente em vez de deixar a corrupção passar despercebida).
 - Requer secrets `EGOI_API_KEY` e `CLICKUP_API_TOKEN` (token pessoal, gerado em ClickUp → Configurações → Apps → API Token) no GitHub Actions.
 
+### Relatório semanal com sugestões (nov/2026) — tarefa agendada no app Claude
+- **Não roda no GitHub Actions.** Decisão do Yago (2026-11-10): as sugestões usam a sessão da assinatura dele, não a API. Quem dispara é a tarefa agendada `relatorio-news-semanal` do app Claude (`~/.claude/scheduled-tasks/`), no checkout principal, então o código precisa estar no `main` local.
+- **Janelas de retentativa:** a tarefa dispara sexta, sábado, domingo e segunda às 09h, 13h e 17h (`0 9,13,17 * * 0,1,5,6`); se o app estiver fechado na hora, roda quando abrir. A primeira que pegar o computador ligado faz o relatório e grava `concluido.json`; as seguintes veem o marcador (`gerar` devolve `ja_feito`) e saem sem gastar nada.
+- **Divisão de trabalho:** `src/relatorio-semanal.js gerar` lê o E-goi (só leitura) e o banco publicado no GitHub (baixado pra pasta temporária, sem tocar no checkout), calcula os sinais em código (`src/lib/relatorio.js`, com testes) e grava `Relatorios/semanal/<data-da-edição>/relatorio.html` + `sinais.json`. A sessão do Claude lê `sinais.json`, escreve no máximo 3 sugestões em JSON, roda `sugestoes <arquivo>` (valida, renderiza no lugar do marcador `<!-- SUGESTOES -->` e registra em `Relatorios/semanal/sugestoes.json` com status `pendente`), cria **rascunho** no Gmail do Yago (nunca envia) e roda `concluir`.
+- **Travas dos sinais:** segmento só tem confiança `ok` com 4+ edições e 20+ aberturas acumuladas; fonte só é "sem clique" com 3+ aparições; cliques de rodapé ficam fora da leitura de interesse; menos de 60h de envio gera alerta de número parcial.
+- **Status das sugestões:** o Yago muda em `Relatorios/semanal/sugestoes.json` (`pendente` → `aceita`/`recusada`/`aplicada`), direto ou pedindo numa sessão. As recusadas não voltam; as aplicadas são acompanhadas nos relatórios seguintes.
+- `Relatorios/semanal/` fica no `.gitignore`: números de campanha não vão pro repositório público.
+
 ---
 
 ## Pontos de atenção / bugs conhecidos (verificar antes de mexer)
@@ -208,7 +216,7 @@ Análise do gasto de tokens do pipeline Claude API, com o objetivo de reduzir cu
 - Commits semanais do bot (`chore: WF-0x ... edição N`, imagens) **nunca** ganham tag: são dados, não código.
 - Publicar tag/Release mexe no repositório público: pedir o ok do Yago antes.
 - **Não fazer merge no `main` enquanto o pipeline da semana estiver rodando** (segunda, da madrugada até o preview): o bot faz `git push` do banco sem `pull` e o push é recusado se o `main` andou no meio, derrubando a etapa.
-- Histórico (tags retroativas criadas em 2026-11-09; antes delas o `package.json` ficou em 0.1.0): v1.0.0 migração N8N → Node + SQLite (03/07) · v1.1.0 lista única, rascunhos no E-goi, teste A/B de CTA (18/08) · v1.2.0 geração na segunda (28/09) · v1.3.0 coleta segmentada e agendamento no E-goi (22/10) · v1.4.0 API de lote (26/10) · v2.0.0 news segmentada em 7 versões, Haiku na curadoria, integridade (03/11) · v2.0.1 identidade do git nos scripts, Node 24 no Actions, e-mails de terceiros fora do repo (09/11) · v2.0.2 imagem com `&amp;` decodificada, matéria paga barrada na integridade, feed do Estadão fora (09/11) · v2.0.3 linha de identidade encurtada.
+- Histórico (tags retroativas criadas em 2026-11-09; antes delas o `package.json` ficou em 0.1.0): v1.0.0 migração N8N → Node + SQLite (03/07) · v1.1.0 lista única, rascunhos no E-goi, teste A/B de CTA (18/08) · v1.2.0 geração na segunda (28/09) · v1.3.0 coleta segmentada e agendamento no E-goi (22/10) · v1.4.0 API de lote (26/10) · v2.0.0 news segmentada em 7 versões, Haiku na curadoria, integridade (03/11) · v2.0.1 identidade do git nos scripts, Node 24 no Actions, e-mails de terceiros fora do repo (09/11) · v2.0.2 imagem com `&amp;` decodificada, matéria paga barrada na integridade, feed do Estadão fora (09/11) · v2.0.3 linha de identidade encurtada · v2.1.0 relatório semanal com sugestões (tarefa agendada no app Claude).
 
 ## Pendências / backlog
 
